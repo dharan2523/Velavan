@@ -1,0 +1,64 @@
+@if (attachments().length === 0) {
+  <div class="attachment-empty">
+    <mat-icon aria-hidden="true">attach_file</mat-icon>
+    <p>No attachments have been uploaded yet.</p>
+  </div>
+} @else {
+  <ul class="attachment-list">
+    @for (attachment of attachments(); track attachment.id) {
+      <li class="attachment">
+        <div class="attachment__icon" aria-hidden="true">
+          <mat-icon>{{ fileIcon(attachment) }}</mat-icon>
+        </div>
+
+        <div class="attachment__copy">
+          <p class="attachment__name" [title]="attachment.originalFileName">
+            {{ attachment.originalFileName }}
+          </p>
+          <p class="attachment__meta">
+            {{ formatSize(attachment.sizeBytes) }} ·
+            {{ attachment.createdAtUtc | date: 'medium' }}
+          </p>
+        </div>
+
+        <div class="attachment__actions">
+          @if (isImage(attachment)) {
+            <button
+              mat-icon-button
+              type="button"
+              matTooltip="Preview"
+              aria-label="Preview attachment"
+              [disabled]="busyAttachmentId() === attachment.id"
+              (click)="preview.emit(attachment)"
+            >
+              <mat-icon>visibility</mat-icon>
+            </button>
+          }
+
+          <button
+            mat-icon-button
+            type="button"
+            matTooltip="Download"
+            aria-label="Download attachment"
+            [disabled]="busyAttachmentId() === attachment.id"
+            (click)="download.emit(attachment)"
+          >
+            <mat-icon>download</mat-icon>
+          </button>
+
+          <button
+            mat-icon-button
+            type="button"
+            matTooltip="Delete attachment"
+            aria-label="Delete attachment"
+            class="attachment__delete"
+            [disabled]="busyAttachmentId() === attachment.id"
+            (click)="deleteAttachment.emit(attachment)"
+          >
+            <mat-icon>delete_outline</mat-icon>
+          </button>
+        </div>
+      </li>
+    }
+  </ul>
+}

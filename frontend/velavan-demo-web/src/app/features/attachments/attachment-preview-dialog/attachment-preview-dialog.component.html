@@ -1,0 +1,40 @@
+<h2 mat-dialog-title class="preview__title">
+  {{ data.fileName }}
+</h2>
+
+<mat-dialog-content class="preview">
+  @if (loading()) {
+    <div class="preview__state">
+      <mat-spinner diameter="36" aria-label="Loading attachment" />
+    </div>
+  } @else if (error()) {
+    <div class="preview__state preview__state--error" role="alert">
+      <mat-icon aria-hidden="true">error_outline</mat-icon>
+      <p>{{ error() }}</p>
+    </div>
+  } @else if (isImage() && imageUrl()) {
+    <img
+      class="preview__image"
+      [src]="imageUrl()"
+      [alt]="data.fileName"
+    />
+  } @else {
+    <div class="preview__state">
+      <mat-icon aria-hidden="true">description</mat-icon>
+      <p>This file type cannot be previewed here. Download it to view it.</p>
+    </div>
+  }
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  <button mat-button type="button" (click)="close()">Close</button>
+  <button
+    mat-flat-button
+    type="button"
+    [disabled]="!content() || loading()"
+    (click)="download()"
+  >
+    <mat-icon>download</mat-icon>
+    Download
+  </button>
+</mat-dialog-actions>

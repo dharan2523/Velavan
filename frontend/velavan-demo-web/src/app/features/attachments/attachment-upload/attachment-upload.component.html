@@ -1,0 +1,52 @@
+<section
+  class="upload"
+  [class.upload--active]="dragActive()"
+  [class.upload--disabled]="isDisabled()"
+  (dragover)="onDragOver($event)"
+  (dragleave)="onDragLeave($event)"
+  (drop)="onDrop($event)"
+>
+  <input
+    #fileInput
+    type="file"
+    class="upload__input"
+    [accept]="accept()"
+    [disabled]="isDisabled()"
+    (change)="onFileInput($event)"
+  />
+
+  <div class="upload__icon" aria-hidden="true">
+    <mat-icon>upload_file</mat-icon>
+  </div>
+
+  <div class="upload__copy">
+    <h3>{{ heading() }}</h3>
+    <p>Drag and drop a file here, or choose a file from your device.</p>
+    <p class="upload__hint">
+      {{ extensionHint() }} · maximum {{ sizeHint() }}
+    </p>
+  </div>
+
+  <button
+    mat-stroked-button
+    type="button"
+    [disabled]="isDisabled()"
+    (click)="openFilePicker()"
+  >
+    <mat-icon>folder_open</mat-icon>
+    Choose file
+  </button>
+</section>
+
+@if (uploading()) {
+  <mat-progress-bar
+    class="upload__progress"
+    [mode]="progressMode()"
+    [value]="progress() ?? 0"
+    aria-label="Uploading attachment"
+  />
+}
+
+@if (validationError()) {
+  <p class="upload__error" role="alert">{{ validationError() }}</p>
+}

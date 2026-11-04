@@ -1,0 +1,128 @@
+<h2 mat-dialog-title>{{ isCreate ? 'Add user' : 'Edit user' }}</h2>
+
+<form [formGroup]="form" (ngSubmit)="submit()" novalidate [attr.aria-busy]="submitting()">
+  <mat-dialog-content class="user-dialog__content">
+    <p class="user-dialog__intro">
+      @if (isCreate) {
+        Create an account and assign its initial access role.
+      } @else {
+        Update the user's profile details. Use Manage roles to change access.
+      }
+    </p>
+
+    <div class="user-dialog__grid">
+      <mat-form-field appearance="outline">
+        <mat-label>First name</mat-label>
+        <input matInput formControlName="firstName" maxlength="100" autocomplete="given-name" />
+        @if (form.controls.firstName.touched && form.controls.firstName.hasError('required')) {
+          <mat-error>First name is required.</mat-error>
+        } @else if (form.controls.firstName.hasError('maxlength')) {
+          <mat-error>First name must be 100 characters or fewer.</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Last name</mat-label>
+        <input matInput formControlName="lastName" maxlength="100" autocomplete="family-name" />
+        @if (form.controls.lastName.touched && form.controls.lastName.hasError('required')) {
+          <mat-error>Last name is required.</mat-error>
+        } @else if (form.controls.lastName.hasError('maxlength')) {
+          <mat-error>Last name must be 100 characters or fewer.</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="user-dialog__wide">
+        <mat-label>Username</mat-label>
+        <mat-icon matPrefix>person_outline</mat-icon>
+        <input
+          matInput
+          formControlName="username"
+          maxlength="256"
+          autocomplete="username"
+        />
+        @if (form.controls.username.touched && form.controls.username.hasError('required')) {
+          <mat-error>Username is required.</mat-error>
+        } @else if (form.controls.username.hasError('maxlength')) {
+          <mat-error>Username must be 256 characters or fewer.</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="user-dialog__wide">
+        <mat-label>Email (optional)</mat-label>
+        <mat-icon matPrefix>mail_outline</mat-icon>
+        <input matInput type="email" formControlName="email" maxlength="256" autocomplete="email" />
+        @if (form.controls.email.hasError('email')) {
+          <mat-error>Enter a valid email address.</mat-error>
+        } @else if (form.controls.email.hasError('maxlength')) {
+          <mat-error>Email must be 256 characters or fewer.</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="user-dialog__wide">
+        <mat-label>Phone number</mat-label>
+        <mat-icon matPrefix>phone</mat-icon>
+        <input matInput formControlName="phoneNumber" maxlength="30" autocomplete="tel" />
+        @if (form.controls.phoneNumber.hasError('maxlength')) {
+          <mat-error>Phone number must be 30 characters or fewer.</mat-error>
+        }
+      </mat-form-field>
+
+      @if (isCreate) {
+        <mat-form-field appearance="outline" class="user-dialog__wide">
+          <mat-label>Password</mat-label>
+          <mat-icon matPrefix>lock_outline</mat-icon>
+          <input
+            matInput
+            [type]="showPassword() ? 'text' : 'password'"
+            formControlName="password"
+            maxlength="200"
+            autocomplete="new-password"
+          />
+          <button
+            mat-icon-button
+            matSuffix
+            type="button"
+            [attr.aria-label]="showPassword() ? 'Hide password' : 'Show password'"
+            (click)="togglePasswordVisibility()"
+          >
+            <mat-icon>{{ showPassword() ? 'visibility_off' : 'visibility' }}</mat-icon>
+          </button>
+          <mat-hint>{{ passwordPolicyDescription }}</mat-hint>
+          @if (form.controls.password.touched && form.controls.password.hasError('required')) {
+            <mat-error>Password is required.</mat-error>
+          } @else if (form.controls.password.hasError('passwordPolicy')) {
+            <mat-error>{{ passwordPolicyDescription }}</mat-error>
+          } @else if (form.controls.password.hasError('maxlength')) {
+            <mat-error>Password must be 200 characters or fewer.</mat-error>
+          }
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="user-dialog__wide">
+          <mat-label>Role</mat-label>
+          <mat-select formControlName="role">
+            @for (role of data.availableRoles; track role) {
+              <mat-option [value]="role">{{ role }}</mat-option>
+            }
+          </mat-select>
+          <mat-hint>Only a Super Admin can assign Admin or Super Admin access.</mat-hint>
+        </mat-form-field>
+      }
+    </div>
+
+    @if (errorMessage()) {
+      <div class="user-dialog__error" role="alert">
+        <mat-icon aria-hidden="true">error_outline</mat-icon>
+        <span>{{ errorMessage() }}</span>
+      </div>
+    }
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end">
+    <button mat-button type="button" [disabled]="submitting()" (click)="cancel()">
+      Cancel
+    </button>
+    <button mat-flat-button color="primary" type="submit" [disabled]="submitting()">
+      {{ submitting() ? 'Saving…' : isCreate ? 'Create user' : 'Save changes' }}
+    </button>
+  </mat-dialog-actions>
+</form>

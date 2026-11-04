@@ -1,0 +1,205 @@
+<section class="users-page">
+  <header class="users-page__header">
+    <div>
+      <p class="users-page__eyebrow">Administration</p>
+      <h1>Users</h1>
+      <p class="users-page__lede">
+        Manage accounts, access roles, and sign-in status for your workspace.
+      </p>
+    </div>
+
+    <button mat-flat-button color="primary" type="button" (click)="openCreateDialog()">
+      <mat-icon>person_add</mat-icon>
+      Add user
+    </button>
+  </header>
+
+  <div class="users-page__filters">
+    <mat-form-field appearance="outline" class="users-page__search" subscriptSizing="dynamic">
+      <mat-label>Search</mat-label>
+      <mat-icon matPrefix>search</mat-icon>
+      <input matInput [formControl]="searchControl" placeholder="Name or username" />
+    </mat-form-field>
+
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Status</mat-label>
+      <mat-select [formControl]="statusControl">
+        <mat-option value="">All statuses</mat-option>
+        @for (status of statusOptions; track status) {
+          <mat-option [value]="status">{{ status }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+
+    <mat-form-field appearance="outline" subscriptSizing="dynamic">
+      <mat-label>Role</mat-label>
+      <mat-select [formControl]="roleControl">
+        <mat-option value="">All roles</mat-option>
+        @for (role of roleOptions; track role) {
+          <mat-option [value]="role">{{ role }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+
+    <button
+      mat-stroked-button
+      type="button"
+      class="users-page__clear"
+      [disabled]="!hasActiveFilters()"
+      (click)="resetFilters()"
+    >
+      Clear
+    </button>
+  </div>
+
+  @if (loadError()) {
+    <div class="users-page__error" role="alert">
+      <div class="users-page__error-copy">
+        <mat-icon aria-hidden="true">error_outline</mat-icon>
+        <span>{{ loadError() }}</span>
+      </div>
+      <button mat-button type="button" (click)="loadUsers()">Retry</button>
+    </div>
+  }
+
+  <div class="users-card">
+    @if (loading()) {
+      <mat-progress-bar mode="indeterminate" aria-label="Loading users" />
+    }
+
+    @if (!loading() && !loadError() && users().length === 0) {
+      <div class="users-card__empty">
+        <mat-icon aria-hidden="true">group_off</mat-icon>
+        <h2>No users found</h2>
+        <p>Try changing your filters or add a new user.</p>
+      </div>
+    }
+
+    @if (users().length > 0) {
+      <div class="users-card__table-wrap">
+        <table mat-table [dataSource]="users()" class="users-table">
+          <ng-container matColumnDef="name">
+            <th mat-header-cell *matHeaderCellDef>Name</th>
+            <td mat-cell *matCellDef="let user">
+              <div class="user-cell">
+                <span class="user-cell__avatar" aria-hidden="true">{{ userInitials(user) }}</span>
+                <span class="user-cell__name">{{ user.firstName }} {{ user.lastName }}</span>
+              </div>
+            </td>
+          </ng-container>
+
+          <ng-container matColumnDef="username">
+            <th mat-header-cell *matHeaderCellDef>Username</th>
+            <td mat-cell *matCellDef="let user" class="users-table__username">{{ user.username }}</td>
+          </ng-container>
+
+          <ng-container matColumnDef="roles">
+            <th mat-header-cell *matHeaderCellDef>Roles</th>
+            <td mat-cell *matCellDef="let user">
+              <div class="role-list">
+                @for (role of user.roles; track role) {
+                  <span
+                    class="role-chip"
+                    [class.role-chip--privileged]="isPrivilegedRole(role)"
+                  >
+                    {{ role }}
+                  </span>
+                }
+              </div>
+            </td>
+          </ng-container>
+
+          <ng-container matColumnDef="status">
+            <th mat-header-cell *matHeaderCellDef>Status</th>
+            <td mat-cell *matCellDef="let user">
+              <span
+                class="status-chip"
+                [class.status-chip--active]="user.status === 'Active'"
+                [class.status-chip--inactive]="user.status === 'Inactive'"
+                [class.status-chip--suspended]="user.status === 'Suspended'"
+              >
+                <span class="status-chip__dot" aria-hidden="true"></span>
+                {{ user.status }}
+              </span>
+            </td>
+          </ng-container>
+
+          <ng-container matColumnDef="created">
+            <th mat-header-cell *matHeaderCellDef>Created</th>
+            <td mat-cell *matCellDef="let user" class="users-table__date">
+              {{ user.createdAtUtc | date: 'mediumDate' }}
+            </td>
+          </ng-container>
+
+          <ng-container matColumnDef="actions">
+            <th mat-header-cell *matHeaderCellDef class="users-table__actions-header">
+              Actions
+            </th>
+            <td mat-cell *matCellDef="let user">
+              @if (hasRowActions(user)) {
+                <div class="row-actions">
+                  @if (canEditUser(user)) {
+                    <button
+                      mat-icon-button
+                      type="button"
+                      matTooltip="Edit details"
+                      [attr.aria-label]="'Edit ' + user.firstName + ' ' + user.lastName"
+                      (click)="openEditDialog(user)"
+                    >
+                      <mat-icon>edit</mat-icon>
+                    </button>
+                  }
+
+                  @if (canManageRoles()) {
+                    <button
+                      mat-icon-button
+                      type="button"
+                      matTooltip="Manage roles"
+                      [attr.aria-label]="'Manage roles for ' + user.firstName + ' ' + user.lastName"
+                      (click)="openRolesDialog(user)"
+                    >
+                      <mat-icon>admin_panel_settings</mat-icon>
+                    </button>
+                  }
+
+                  @if (canChangeStatus(user)) {
+                    <button
+                      mat-icon-button
+                      type="button"
+                      [matTooltip]="statusActionLabel(user)"
+                      [attr.aria-label]="statusActionLabel(user)"
+                      [disabled]="busyUserId() === user.id"
+                      (click)="openStatusDialog(user)"
+                    >
+                      <mat-icon>{{ statusActionIcon(user) }}</mat-icon>
+                    </button>
+                  }
+                </div>
+              } @else {
+                <span class="row-actions__none">—</span>
+              }
+            </td>
+          </ng-container>
+
+          <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+          <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
+        </table>
+      </div>
+    }
+
+    @if (totalCount() > 0) {
+      <div class="users-card__footer">
+        <span>{{ totalCount() }} {{ totalCount() === 1 ? 'user' : 'users' }}</span>
+        <mat-paginator
+          [length]="totalCount()"
+          [pageIndex]="pageIndex()"
+          [pageSize]="pageSize()"
+          [pageSizeOptions]="pageSizeOptions"
+          [showFirstLastButtons]="true"
+          aria-label="Select page of users"
+          (page)="onPageChanged($event)"
+        />
+      </div>
+    }
+  </div>
+</section>

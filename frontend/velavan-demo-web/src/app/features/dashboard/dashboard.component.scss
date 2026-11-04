@@ -1,0 +1,40 @@
+.dashboard-placeholder {
+  display: grid;
+  place-items: start;
+}
+
+.dashboard-placeholder__card {
+  width: min(100%, 720px);
+  padding: 32px;
+  border: 1px solid var(--app-border);
+  border-radius: 16px;
+  background: var(--app-surface);
+  box-shadow: 0 12px 30px rgb(15 23 42 / 6%);
+}
+
+.dashboard-placeholder__eyebrow {
+  margin: 0 0 8px;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dashboard-placeholder h1 {
+  margin: 0 0 12px;
+  font-size: clamp(24px, 3vw, 32px);
+  letter-spacing: -0.03em;
+}
+
+.dashboard-placeholder p:last-child {
+  margin: 0;
+  color: var(--app-muted);
+  line-height: 1.6;
+}
+
+@media (max-width: 600px) {
+  .dashboard-placeholder__card {
+    padding: 24px;
+  }
+}

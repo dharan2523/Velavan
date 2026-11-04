@@ -1,0 +1,107 @@
+<div class="login-page">
+  <section class="login-page__brand" aria-hidden="true">
+    <div class="login-page__brand-inner">
+      <div class="login-page__logo">{{ branding.shortName().charAt(0) }}</div>
+      <p class="login-page__eyebrow">{{ branding.displayName() }}</p>
+      <h2>Run your operations from one place.</h2>
+      <p class="login-page__lede">
+        Sign in to the admin console to manage your workspace, users, and daily
+        operations.
+      </p>
+      <ul class="login-page__points">
+        <li><mat-icon>verified_user</mat-icon> Secure, role-based access</li>
+        <li><mat-icon>insights</mat-icon> A clear view of your workspace</li>
+      </ul>
+    </div>
+  </section>
+
+  <main class="login-page__panel">
+    <div class="login-card">
+      <div class="login-card__brand">
+        <div class="login-card__logo">{{ branding.shortName().charAt(0) }}</div>
+        <span>{{ branding.displayName() }}</span>
+      </div>
+
+      <div class="login-card__heading">
+        <p class="login-card__eyebrow">Admin console</p>
+        <h1>Welcome back</h1>
+        <p>Sign in with your username and password.</p>
+      </div>
+
+      <form
+        class="login-card__form"
+        [formGroup]="form"
+        (ngSubmit)="submit()"
+        novalidate
+        aria-label="Sign in"
+        [attr.aria-busy]="submitting()"
+      >
+        <mat-form-field appearance="outline">
+          <mat-label>Username</mat-label>
+          <mat-icon matPrefix>person_outline</mat-icon>
+          <input
+            matInput
+            type="text"
+            formControlName="username"
+            autocomplete="username"
+            maxlength="256"
+            placeholder="Enter your username"
+          />
+          @if (form.controls.username.touched && form.controls.username.hasError('required')) {
+            <mat-error>Username is required.</mat-error>
+          } @else if (form.controls.username.touched && form.controls.username.hasError('maxlength')) {
+            <mat-error>Username must be 256 characters or fewer.</mat-error>
+          }
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Password</mat-label>
+          <mat-icon matPrefix>lock_outline</mat-icon>
+          <input
+            matInput
+            [type]="showPassword() ? 'text' : 'password'"
+            formControlName="password"
+            autocomplete="current-password"
+            maxlength="200"
+          />
+          <button
+            mat-icon-button
+            matSuffix
+            type="button"
+            class="login-card__password-toggle"
+            [attr.aria-label]="showPassword() ? 'Hide password' : 'Show password'"
+            (click)="togglePasswordVisibility()"
+          >
+            <mat-icon>{{ showPassword() ? 'visibility_off' : 'visibility' }}</mat-icon>
+          </button>
+          @if (form.controls.password.touched && form.controls.password.hasError('required')) {
+            <mat-error>Password is required.</mat-error>
+          } @else if (form.controls.password.touched && form.controls.password.hasError('maxlength')) {
+            <mat-error>Password must be 200 characters or fewer.</mat-error>
+          }
+        </mat-form-field>
+
+        @if (errorMessage()) {
+          <div class="login-card__error" role="alert">
+            <mat-icon aria-hidden="true">error_outline</mat-icon>
+            <span>{{ errorMessage() }}</span>
+          </div>
+        }
+
+        <button
+          mat-flat-button
+          color="primary"
+          class="login-card__submit"
+          type="submit"
+          [disabled]="submitting()"
+        >
+          {{ submitting() ? 'Signing in…' : 'Sign in' }}
+        </button>
+      </form>
+
+      <p class="login-card__footer">
+        Need access? Contact your workspace administrator.
+      </p>
+    </div>
+  </main>
+</div>

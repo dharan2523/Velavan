@@ -1,0 +1,48 @@
+:host {
+  display: block;
+}
+
+.manager {
+  display: grid;
+  gap: 16px;
+}
+
+.manager__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.manager__header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.manager__header p {
+  margin: 4px 0 0;
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.manager__error {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.manager__notice {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .manager__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,78 @@
+:host {
+  display: block;
+}
+
+.attachment-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: var(--app-surface);
+}
+
+.attachment__icon {
+  display: grid;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 12px;
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.attachment__copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.attachment__name {
+  overflow: hidden;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment__meta {
+  margin: 3px 0 0;
+  color: var(--app-muted);
+  font-size: 11px;
+}
+
+.attachment__actions {
+  display: flex;
+  align-items: center;
+}
+
+.attachment__delete {
+  color: #b91c1c !important;
+}
+
+.attachment-empty {
+  display: grid;
+  min-height: 140px;
+  padding: 24px;
+  place-items: center;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  color: var(--app-muted);
+  text-align: center;
+}
+
+.attachment-empty mat-icon {
+  width: 36px;
+  height: 36px;
+  font-size: 36px;
+}

@@ -1,0 +1,46 @@
+<header class="app-header">
+  <button
+    mat-icon-button
+    type="button"
+    class="app-header__menu"
+    aria-label="Toggle navigation"
+    (click)="menuToggle.emit()"
+  >
+    <mat-icon>menu</mat-icon>
+  </button>
+
+  <div class="app-header__title">{{ pageTitle() }}</div>
+  <div class="app-header__spacer"></div>
+
+  @if (isAuthenticated()) {
+    <div class="app-header__user">
+      <div class="app-header__avatar" aria-hidden="true">{{ initials() }}</div>
+      <div class="app-header__user-copy">
+        <span class="app-header__name">{{ displayName() }}</span>
+        <span class="app-header__role">{{ primaryRole() }}</span>
+      </div>
+    </div>
+
+    <button
+      mat-icon-button
+      type="button"
+      class="app-header__action"
+      aria-label="Change password"
+      title="Change password"
+      (click)="openChangePassword()"
+    >
+      <mat-icon>password</mat-icon>
+    </button>
+
+    <button
+      mat-icon-button
+      type="button"
+      class="app-header__action"
+      aria-label="Sign out"
+      title="Sign out"
+      (click)="logout()"
+    >
+      <mat-icon>logout</mat-icon>
+    </button>
+  }
+</header>

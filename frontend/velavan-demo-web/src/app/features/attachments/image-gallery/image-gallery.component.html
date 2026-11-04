@@ -1,0 +1,94 @@
+@if (images().length === 0) {
+  <div class="gallery-empty">
+    <mat-icon aria-hidden="true">photo_library</mat-icon>
+    <p>No product images have been uploaded yet.</p>
+  </div>
+} @else {
+  <div class="gallery">
+    @for (image of images(); track image.id; let index = $index) {
+      <article
+        class="gallery__item"
+        [class.gallery__item--primary]="image.isPrimary"
+      >
+        <button
+          type="button"
+          class="gallery__preview"
+          [disabled]="busy()"
+          [attr.aria-label]="'Preview ' + image.originalFileName"
+          (click)="preview.emit(image)"
+        >
+          <app-attachment-thumbnail
+            [attachmentId]="image.id"
+            [alt]="image.originalFileName"
+          />
+        </button>
+
+        @if (image.isPrimary) {
+          <span class="gallery__primary">
+            <mat-icon aria-hidden="true">star</mat-icon>
+            Primary
+          </span>
+        }
+
+        <div class="gallery__details">
+          <p class="gallery__name" [title]="image.originalFileName">
+            {{ image.originalFileName }}
+          </p>
+          <p class="gallery__meta">
+            {{ formatSize(image.sizeBytes) }}
+            @if (image.width && image.height) {
+              · {{ image.width }} × {{ image.height }}
+            }
+          </p>
+        </div>
+
+        <div class="gallery__actions">
+          <button
+            mat-icon-button
+            type="button"
+            matTooltip="Set as primary"
+            aria-label="Set as primary"
+            [disabled]="busy() || image.isPrimary"
+            (click)="setPrimary.emit(image)"
+          >
+            <mat-icon>star_outline</mat-icon>
+          </button>
+
+          <button
+            mat-icon-button
+            type="button"
+            matTooltip="Move earlier"
+            aria-label="Move earlier"
+            [disabled]="busy() || index === 0"
+            (click)="move(index, -1)"
+          >
+            <mat-icon>arrow_back</mat-icon>
+          </button>
+
+          <button
+            mat-icon-button
+            type="button"
+            matTooltip="Move later"
+            aria-label="Move later"
+            [disabled]="busy() || index === images().length - 1"
+            (click)="move(index, 1)"
+          >
+            <mat-icon>arrow_forward</mat-icon>
+          </button>
+
+          <button
+            mat-icon-button
+            type="button"
+            matTooltip="Delete image"
+            aria-label="Delete image"
+            class="gallery__delete"
+            [disabled]="busy()"
+            (click)="deleteImage.emit(image)"
+          >
+            <mat-icon>delete_outline</mat-icon>
+          </button>
+        </div>
+      </article>
+    }
+  </div>
+}

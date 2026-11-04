@@ -1,0 +1,37 @@
+<aside class="app-sidebar">
+  <div class="app-sidebar__brand">
+    <div class="app-sidebar__logo" aria-hidden="true">{{ shortName().charAt(0) }}</div>
+    <div class="app-sidebar__brand-copy">
+      <div class="app-sidebar__name">{{ displayName() }}</div>
+      <div class="app-sidebar__tagline">Admin console</div>
+    </div>
+  </div>
+
+  <nav class="app-sidebar__nav" aria-label="Primary navigation">
+    <a
+      class="app-sidebar__link"
+      routerLink="/"
+      routerLinkActive="app-sidebar__link--active"
+      [routerLinkActiveOptions]="{ exact: true }"
+      (click)="navigate.emit()"
+    >
+      <mat-icon>dashboard</mat-icon>
+      <span>Dashboard</span>
+    </a>
+
+    @if (isAdmin()) {
+      <a
+        class="app-sidebar__link"
+        routerLink="/users"
+        routerLinkActive="app-sidebar__link--active"
+        [routerLinkActiveOptions]="{ exact: true }"
+        (click)="navigate.emit()"
+      >
+        <mat-icon>group</mat-icon>
+        <span>Users</span>
+      </a>
+    }
+  </nav>
+
+  <div class="app-sidebar__footer">Phase 1 scaffold</div>
+</aside>

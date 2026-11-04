@@ -1,0 +1,56 @@
+# .NET build output
+bin/
+obj/
+.vs/
+TestResults/
+coverage/
+*.trx
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Node / Angular
+node_modules/
+dist/
+.angular/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Local configuration and secrets
+.env
+.env.*
+appsettings.*.local.json
+*.pfx
+*.snk
+
+# Logs
+logs/
+*.log
+
+# OS files
+Thumbs.db
+.DS_Store
+# Build outputs
+**/bin/
+**/obj/
+
+# Node / Angular
+**/node_modules/
+**/dist/
+**/.angular/
+
+# Test and temporary files
+**/test.err
+*.log
+artifacts/
+
+# Local configuration
+appsettings.Development.json

@@ -1,0 +1,55 @@
+<section class="manager">
+  <header class="manager__header">
+    <div>
+      <h2>{{ heading() }}</h2>
+      <p>
+        {{ attachments().length }} of {{ maxAttachments() }} files ·
+        PDF, JPEG, PNG, or WebP up to 20 MB each
+      </p>
+    </div>
+
+    <button
+      mat-stroked-button
+      type="button"
+      [disabled]="loading()"
+      (click)="loadAttachments()"
+    >
+      <mat-icon>refresh</mat-icon>
+      Refresh
+    </button>
+  </header>
+
+  @if (loadError()) {
+    <p class="manager__error" role="alert">{{ loadError() }}</p>
+  }
+
+  @if (loading()) {
+    <mat-progress-bar mode="indeterminate" aria-label="Loading attachments" />
+  }
+
+  @if (atLimit()) {
+    <p class="manager__notice">
+      The maximum number of attachments has been reached. Delete a file before
+      uploading another.
+    </p>
+  }
+
+  <app-attachment-upload
+    accept=".pdf,.jpg,.jpeg,.png,.webp"
+    heading="Upload attachment"
+    [allowedExtensions]="documentExtensions"
+    [maxBytes]="maxDocumentBytes"
+    [uploading]="uploading()"
+    [progress]="uploadProgress()"
+    [disabled]="atLimit()"
+    (fileSelected)="upload($event)"
+  />
+
+  <app-attachment-list
+    [attachments]="attachments()"
+    [busyAttachmentId]="busyAttachmentId()"
+    (preview)="preview($event)"
+    (download)="download($event)"
+    (deleteAttachment)="confirmDelete($event)"
+  />
+</section>

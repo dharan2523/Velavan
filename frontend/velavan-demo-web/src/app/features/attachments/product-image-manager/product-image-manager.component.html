@@ -1,0 +1,56 @@
+<section class="manager">
+  <header class="manager__header">
+    <div>
+      <h2>{{ heading() }}</h2>
+      <p>
+        {{ images().length }} of {{ maxImages() }} images ·
+        JPEG, PNG, or WebP up to 10 MB
+      </p>
+    </div>
+
+    <button
+      mat-stroked-button
+      type="button"
+      [disabled]="loading()"
+      (click)="loadImages()"
+    >
+      <mat-icon>refresh</mat-icon>
+      Refresh
+    </button>
+  </header>
+
+  @if (loadError()) {
+    <p class="manager__error" role="alert">{{ loadError() }}</p>
+  }
+
+  @if (loading()) {
+    <mat-progress-bar mode="indeterminate" aria-label="Loading product images" />
+  }
+
+  @if (atLimit()) {
+    <p class="manager__notice">
+      The maximum number of images has been reached. Delete an image before
+      uploading another.
+    </p>
+  }
+
+  <app-attachment-upload
+    accept=".jpg,.jpeg,.png,.webp"
+    heading="Upload product image"
+    [allowedExtensions]="imageExtensions"
+    [maxBytes]="maxImageBytes"
+    [uploading]="uploading()"
+    [progress]="uploadProgress()"
+    [disabled]="atLimit()"
+    (fileSelected)="upload($event)"
+  />
+
+  <app-image-gallery
+    [images]="images()"
+    [busy]="isBusy()"
+    (preview)="preview($event)"
+    (setPrimary)="setPrimary($event)"
+    (deleteImage)="confirmDelete($event)"
+    (reorder)="reorder($event)"
+  />
+</section>

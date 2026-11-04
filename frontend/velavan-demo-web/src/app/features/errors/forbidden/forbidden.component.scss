@@ -1,0 +1,63 @@
+:host {
+  display: block;
+}
+
+.forbidden {
+  display: grid;
+  min-height: 60vh;
+  place-items: center;
+}
+
+.forbidden__card {
+  width: min(100%, 560px);
+  padding: 36px;
+  border: 1px solid var(--app-border);
+  border-radius: 18px;
+  background: var(--app-surface);
+  box-shadow: 0 16px 40px rgb(15 23 42 / 6%);
+}
+
+.forbidden__icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 22px;
+  place-items: center;
+  border-radius: 14px;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.forbidden__eyebrow {
+  margin: 0 0 8px;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.forbidden h1 {
+  margin: 0 0 12px;
+  font-size: clamp(24px, 3vw, 30px);
+  letter-spacing: -0.03em;
+}
+
+.forbidden__message {
+  margin: 0;
+  color: var(--app-muted);
+  line-height: 1.65;
+}
+
+.forbidden__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+@media (max-width: 600px) {
+  .forbidden__card {
+    padding: 26px;
+  }
+}
