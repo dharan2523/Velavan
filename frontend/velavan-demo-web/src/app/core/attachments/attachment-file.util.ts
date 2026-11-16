@@ -10,7 +10,7 @@ export function saveBlob(blob: Blob, fileName: string): void {
   anchor.click();
   anchor.remove();
 
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
 }
 
 export function formatFileSize(bytes: number): string {

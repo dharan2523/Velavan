@@ -1,12 +1,15 @@
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using VelavanDemo.Api.Authorization;
+using VelavanDemo.Application.Attachments;
 using VelavanDemo.Application.Security;
 using VelavanDemo.Domain.Authorization;
 using VelavanDemo.Domain.Enums;
@@ -45,7 +48,27 @@ builder.Services.AddControllers()
     .AddJsonOptions(options =>
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
-builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddInfrastructure(builder.Configuration, builder.Environment);
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("attachment-uploads", context =>
+    {
+        var partitionKey = context.User.FindFirstValue(AuthClaimTypes.UserId)
+            ?? context.Connection.RemoteIpAddress?.ToString()
+            ?? "anonymous";
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey,
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 30,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            });
+    });
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -160,11 +183,38 @@ if (allowedOrigins.Length > 0)
 
 var app = builder.Build();
 
+using (var startupScope = app.Services.CreateScope())
+{
+    startupScope.ServiceProvider.GetRequiredService<IFileStorage>();
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+else
+{
+    app.UseHsts();
+}
+
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.TryAdd("X-Content-Type-Options", "nosniff");
+    context.Response.Headers.TryAdd("X-Frame-Options", "DENY");
+    context.Response.Headers.TryAdd("Referrer-Policy", "no-referrer");
+    context.Response.Headers.TryAdd("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    context.Response.Headers.TryAdd("Cross-Origin-Resource-Policy", "same-site");
+
+    if (!context.Request.Path.StartsWithSegments("/swagger"))
+    {
+        context.Response.Headers.TryAdd(
+            "Content-Security-Policy",
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+    }
+
+    await next();
+});
 
 app.UseHttpsRedirection();
 
@@ -174,6 +224,7 @@ if (allowedOrigins.Length > 0)
 }
 
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapControllers();

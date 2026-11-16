@@ -28,7 +28,7 @@
               type="button"
               matTooltip="Preview"
               aria-label="Preview attachment"
-              [disabled]="busyAttachmentId() === attachment.id"
+              [disabled]="isBusy(attachment.id)"
               (click)="preview.emit(attachment)"
             >
               <mat-icon>visibility</mat-icon>
@@ -40,7 +40,7 @@
             type="button"
             matTooltip="Download"
             aria-label="Download attachment"
-            [disabled]="busyAttachmentId() === attachment.id"
+            [disabled]="isBusy(attachment.id)"
             (click)="download.emit(attachment)"
           >
             <mat-icon>download</mat-icon>
@@ -52,7 +52,7 @@
             matTooltip="Delete attachment"
             aria-label="Delete attachment"
             class="attachment__delete"
-            [disabled]="busyAttachmentId() === attachment.id"
+            [disabled]="isBusy(attachment.id)"
             (click)="deleteAttachment.emit(attachment)"
           >
             <mat-icon>delete_outline</mat-icon>

@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatDialog, MatDialogRef } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
-import { of } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import { ProductImageResponse } from '../../../core/attachments/attachment.models';
 import { AttachmentService } from '../../../core/attachments/attachment.service';
 import { ProductImageManagerComponent } from './product-image-manager.component';
@@ -120,5 +120,42 @@ describe('ProductImageManagerComponent', () => {
 
     expect(attachmentService.uploadProductImage).not.toHaveBeenCalled();
     expect(snackBar.open).toHaveBeenCalled();
+  });
+
+  it('ignores stale image list responses', () => {
+    const firstLoad = new Subject<ProductImageResponse[]>();
+    const secondLoad = new Subject<ProductImageResponse[]>();
+    const newerImage = { ...image, id: 2, originalFileName: 'newer.png' };
+
+    attachmentService.getProductImages.and.returnValues(
+      firstLoad.asObservable(),
+      secondLoad.asObservable()
+    );
+
+    component.loadImages();
+    component.loadImages();
+
+    secondLoad.next([newerImage]);
+    secondLoad.complete();
+    firstLoad.next([image]);
+    firstLoad.complete();
+
+    expect(component.images()).toEqual([newerImage]);
+  });
+
+  it('tracks a delete as busy and ignores repeat actions', () => {
+    const deletion = new Subject<void>();
+    attachmentService.deleteProductImage.and.returnValue(deletion.asObservable());
+
+    component.confirmDelete(image);
+    component.confirmDelete(image);
+
+    expect(component.busyAttachmentIds().has(image.id)).toBeTrue();
+    expect(attachmentService.deleteProductImage).toHaveBeenCalledTimes(1);
+
+    deletion.next();
+    deletion.complete();
+
+    expect(component.busyAttachmentIds().has(image.id)).toBeFalse();
   });
 });

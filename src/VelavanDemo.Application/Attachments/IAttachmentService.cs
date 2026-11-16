@@ -21,7 +21,7 @@ public interface IAttachmentService
 
     Task<OperationResult> ReorderProductImagesAsync(
         int productId,
-        ReorderProductImagesRequest request,
+        ReorderProductImagesRequest? request,
         CancellationToken cancellationToken = default);
 
     Task<OperationResult> DeleteProductImageAsync(

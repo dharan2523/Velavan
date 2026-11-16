@@ -1,8 +1,8 @@
 # Velavan Demo
 
-Phase 1, Step 6 administrator user management for the Velavan Demo application.
+Phase 2 attachment support for the Velavan Demo application.
 
-This step adds role-filtered user listing, profile editing, role and status management, a change-password dialog, admin-only navigation, and the supporting API updates on top of the Step 5 authentication frontend. It does not change the database schema.
+This phase adds product images, customer documents, and order attachments with local filesystem storage, upload validation, malware-scanning hooks, storage reconciliation, admin-only APIs, reusable Angular attachment components, and the `AddAttachmentModule` plus `AddAttachmentIntegrityConstraints` EF Core migrations. It builds on the Phase 1 authentication and administrator user-management features. Both migrations are generated but not applied to any database as part of this work.
 
 ## Solution Structure
 
@@ -31,7 +31,7 @@ Project references:
 - `VelavanDemo.Application` → `VelavanDemo.Domain`
 - `VelavanDemo.Infrastructure` → `VelavanDemo.Application`, `VelavanDemo.Domain`
 - `VelavanDemo.Api` → `VelavanDemo.Application`, `VelavanDemo.Infrastructure`
-- `VelavanDemo.UnitTests` → `VelavanDemo.Domain`, `VelavanDemo.Application`
+- `VelavanDemo.UnitTests` → `VelavanDemo.Domain`, `VelavanDemo.Application`, `VelavanDemo.Infrastructure`
 - `VelavanDemo.IntegrationTests` → `VelavanDemo.Api`, `VelavanDemo.Infrastructure`, `VelavanDemo.Application`, `VelavanDemo.Domain`
 
 ## Prerequisites
@@ -47,15 +47,32 @@ Project references:
 ```powershell
 dotnet restore VelavanDemo.sln
 dotnet build VelavanDemo.sln
-dotnet ef database update --project src/VelavanDemo.Infrastructure --startup-project src/VelavanDemo.Api
 dotnet run --project src/VelavanDemo.Api --launch-profile https
+```
+
+Apply migrations only as a separate, explicitly approved operation:
+
+```powershell
+dotnet ef database update --project src/VelavanDemo.Infrastructure --startup-project src/VelavanDemo.Api
 ```
 
 Swagger is available in Development at `https://localhost:7161/swagger`. Use the **Authorize** button with a Bearer access token from `/api/auth/login`.
 
 The development connection string in `src/VelavanDemo.Api/appsettings.Development.json` targets the `VelavanDemo` database on the default SQL Server instance using Windows Authentication. Migrations are in `src/VelavanDemo.Infrastructure/Persistence/Migrations`.
 
-The `AddUsernameToUsers` migration adds required normalized usernames, backfills existing usernames from the current email values, and makes email optional. Review the generated migration before applying it. Applying the migration is a separate, explicit operation and is not performed automatically by the API.
+The `AddUsernameToUsers` migration adds required normalized usernames, backfills existing usernames from the current email values, and makes email optional.
+
+The `AddAttachmentModule` migration creates `Attachments`, `ProductImages`, `CustomerDocuments`, and `OrderAttachments`, including the filtered unique primary-image index. The `AddAttachmentIntegrityConstraints` migration adds check constraints for positive attachment sizes, valid image dimensions, and non-negative product-image sort order. Both migrations were generated but have not been applied. Review them before applying. Applying migrations is a separate, explicit operation and is not performed automatically by the API.
+
+Production startup validates attachment storage and requires a real malware scanner. The API will fail fast if `Attachments:Storage:Provider` is unsupported, the storage root is invalid, or `Attachments:Scanner:Provider` remains `None` outside Development/Testing. Outside Development and Testing, scanner configuration must use an absolute HTTPS endpoint and a non-empty `Attachments:Scanner:ApiKey`; startup fails when the endpoint uses HTTP or credentials are missing. The local attachment storage root is created with restrictive ACLs on Windows, restricted Unix permissions elsewhere, and the API performs a startup write/read/delete probe. For production, configure the scanner and optional storage service identity through environment variables or a secret store, for example:
+
+```powershell
+Attachments__Scanner__Provider=Http
+Attachments__Scanner__Endpoint=https://scanner.example.test/scan
+Attachments__Scanner__ApiKey=<secret>
+Attachments__Storage__ServiceAccount=<optional-api-service-account>
+Attachments__Reconciliation__OrphanGracePeriodMinutes=30
+```
 
 ### Authentication Configuration
 
@@ -118,13 +135,77 @@ JWT claims use `sub`, `username`, `email` (when an optional email is present), `
 - Unknown roles, duplicate usernames, duplicate non-null emails, and invalid passwords return explicit `400`, `401`, `403`, or `409` responses.
 - Password hashes are never returned by user-management endpoints.
 
+### Attachments
+
+Attachment endpoints require the `Admin or Super Admin` policy.
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/admin/products/{productId}/images` | List product images |
+| `POST` | `/api/admin/products/{productId}/images` | Upload a product image (`multipart/form-data`, field `file`) |
+| `PATCH` | `/api/admin/products/{productId}/images/{attachmentId}/primary` | Set the primary image |
+| `PUT` | `/api/admin/products/{productId}/images/order` | Reorder images |
+| `DELETE` | `/api/admin/products/{productId}/images/{attachmentId}` | Hard-delete an image and its stored file |
+| `GET` | `/api/admin/customers/{customerId}/documents` | List customer documents |
+| `POST` | `/api/admin/customers/{customerId}/documents` | Upload a customer document |
+| `DELETE` | `/api/admin/customers/{customerId}/documents/{attachmentId}` | Hard-delete a customer document |
+| `GET` | `/api/admin/orders/{orderId}/attachments` | List order attachments |
+| `POST` | `/api/admin/orders/{orderId}/attachments` | Upload an order attachment |
+| `DELETE` | `/api/admin/orders/{orderId}/attachments/{attachmentId}` | Hard-delete an order attachment |
+| `GET` | `/api/attachments/{attachmentId}` | Get attachment metadata |
+| `GET` | `/api/attachments/{attachmentId}/content` | Download or preview content; supports `download=true`, ETag/304, and range requests |
+
+Limits and validation:
+
+- Product images: JPEG, PNG, or WebP, up to 10 MB each, maximum 8 per product.
+- Customer documents and order attachments: PDF, JPEG, PNG, or WebP, up to 20 MB each, maximum 25 per owner.
+- File signatures and declared content types are checked against the extension; SVG and executable content are rejected. Empty and `application/octet-stream` declared types are accepted only after signature validation.
+- File names are sanitized, SHA-256 is recorded, and image dimensions are bounded.
+- Inline preview is limited to JPEG, PNG, and WebP; PDFs are download-only.
+- Deletes are hard deletes: the join record and attachment metadata are removed in a transaction, then the stored file is deleted. A failed physical delete is logged and retried by reconciliation.
+- Uploads are rate-limited to 30 requests per minute per user/IP.
+- Upload request limit is 26 MB to accommodate multipart overhead.
+- Attachment mutations are serialized to prevent count, quota, primary-image, and sort-order races. Database unique conflicts return `409`.
+- Quota, scanner, and storage failures return `507`, `422`/`503`, and `503`/`500` responses as appropriate.
+
+Storage, scanner, and reconciliation configuration is in `src/VelavanDemo.Api/appsettings.json`:
+
+```json
+"Attachments": {
+  "Storage": {
+    "Provider": "Local",
+    "RootPath": "C:\\ProgramData\\VelavanDemo\\attachments",
+    "MaxTotalBytes": 0,
+    "ServiceAccount": ""
+  },
+  "Scanner": {
+    "Provider": "None",
+    "Endpoint": "",
+    "ApiKey": "",
+    "TimeoutSeconds": 30
+  },
+  "Reconciliation": {
+    "Enabled": false,
+    "RunOnStartup": false,
+    "IntervalMinutes": 1440,
+    "OrphanGracePeriodMinutes": 30
+  }
+}
+```
+
+`MaxTotalBytes` is a global storage quota; `0` disables the quota. The local provider writes outside the repository and application content root (including `wwwroot`), rejects filesystem roots, symbolic links, junctions, alternate data streams, and traversal keys, and cleans temporary upload files. On Windows it applies restrictive ACLs that grant only the configured API service identity plus necessary system administrators and the current process, removes inherited broad identities, and performs a startup write/read/delete probe. On non-Windows platforms it applies owner-only Unix permissions. Ensure the API process can create and write to this directory.
+
+`NoOpUploadedFileScanner` is available only in Development/Testing and performs no malware scanning. Outside those environments, set `Attachments:Scanner:Provider` to `Http`, set an absolute HTTPS `Attachments:Scanner:Endpoint`, and set a non-empty `Attachments:Scanner:ApiKey`; startup fails when the endpoint uses HTTP or credentials are missing. The HTTP scanner posts the file as multipart field `file`, sends the bearer API key when configured, treats `2xx` as clean, `400`/`422` as malware rejection, and other outcomes/timeouts as scanner unavailable.
+
+Reconciliation is disabled by default. When enabled, it deletes stored files with no attachment metadata after the configurable `Attachments:Reconciliation:OrphanGracePeriodMinutes` period and logs metadata whose stored file is missing. Reconciliation uses the attachment mutation concurrency gate and skips recently written files within the grace period.
+
 ### Tests
 
 ```powershell
 dotnet test VelavanDemo.sln
 ```
 
-The integration suite uses `WebApplicationFactory<Program>` with an isolated EF Core InMemory database and never connects to the configured SQL Server database. It covers username login success/failure, case-insensitive usernames, optional email, inactive accounts, JWT access and claims, authorization policies, admin privilege restrictions, user list search/status/role filters and pagination, profile creation and editing, duplicate usernames, duplicate emails, weak passwords, role updates, status activation/deactivation, last-active-Super-Admin protection, password changes, deactivation invalidating an existing token, and expired tokens.
+The integration suite uses `WebApplicationFactory<Program>` with an isolated EF Core InMemory database and a temporary attachment storage root; it never connects to the configured SQL Server database or the production storage path. It covers username login success/failure, case-insensitive usernames, optional email, inactive accounts, JWT access and claims, authorization policies, admin privilege restrictions, user list search/status/role filters and pagination, profile creation and editing, duplicate usernames, duplicate emails, weak passwords, role updates, status activation/deactivation, last-active-Super-Admin protection, password changes, deactivation invalidating an existing token, expired tokens, attachment upload/list/download/delete flows, type and signature validation, size and count limits, ownership checks, primary-image and reorder rules, ETag/304, missing physical files, storage-write failures, scanner rejection/unavailability, storage quota enforcement, concurrent upload limits, and production startup scanner validation. Unit tests cover local storage path/inventory safeguards, cancellation cleanup, physical-delete failures, unique-conflict cleanup, and reconciliation.
 
 ## Frontend
 
@@ -185,6 +266,17 @@ No additional npm package is required. Tokens are stored in JavaScript-readable 
 - The header change-password dialog verifies the current password and enforces the same strong-password policy as the API. The current session remains signed in.
 - Role changes are saved immediately but the user's existing JWT retains its previous role claims until the token expires or the user signs in again. This is shown in the role dialog.
 
+### Frontend Attachments
+
+Reusable components live under `frontend/velavan-demo-web/src/app/features/attachments/`:
+
+- `attachment-manager` coordinates upload, listing, deletion, progress, and error feedback for an owner.
+- `attachment-upload` and `attachment-list` provide the upload control and file rows.
+- `image-gallery` and `product-image-manager` provide image ordering, primary-image selection, and preview.
+- `attachment-thumbnail` and `attachment-preview-dialog` render authenticated image previews and download links.
+
+Shared HTTP, model, and policy helpers live in `frontend/velavan-demo-web/src/app/core/attachments/`. The components are reusable building blocks; no standalone attachment route or demo page was added. They require an Admin or Super Admin session and use the authenticated attachment endpoints above. Client-side limits come from `attachment-policy.ts`, stale list responses are ignored, concurrent row actions are tracked per attachment, Blob ProblemDetails errors are parsed for user feedback, and object URLs are revoked safely after preview/download use.
+
 The development workflow is:
 
 ```powershell
@@ -215,12 +307,14 @@ It contains 17 PNG reference screens and a README. No ZIP file is present in the
 
 ## Scope Notice
 
-This step does not include:
+This phase does not include:
 
 - Refresh tokens, token revocation lists, or server-side sessions
 - User deletion, self-registration, password reset, email confirmation, MFA, or login rate limiting
 - Audit logging implementation or user-change history screens
-- Inventory, ERP, orders, delivery, reporting, or other business endpoints
+- Inventory, ERP, order lifecycle, delivery, reporting, or other business endpoints
+- Production malware scanning, cloud/blob storage, or CDN delivery
 - A theme redesign or additional branding API integration
+- Applying the `AddAttachmentModule` migration to a database
 - Deployment setup
 - Git initialization or commits

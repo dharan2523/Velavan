@@ -22,6 +22,95 @@ namespace VelavanDemo.Infrastructure.Persistence.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("VelavanDemo.Domain.Entities.Attachment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("FileExtension")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(10)");
+
+                    b.Property<int?>("Height")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("char(64)")
+                        .IsFixedLength();
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<string>("StorageProvider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("UploadedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("Width")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAtUtc");
+
+                    b.HasIndex("Kind");
+
+                    b.HasIndex("Sha256");
+
+                    b.HasIndex("StorageKey")
+                        .IsUnique();
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.ToTable("Attachments", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Attachments_Dimensions", "([Width] IS NULL AND [Height] IS NULL) OR ([Width] > 0 AND [Height] > 0)");
+
+                            t.HasCheckConstraint("CK_Attachments_SizeBytes", "[SizeBytes] > 0");
+                        });
+                });
+
             modelBuilder.Entity("VelavanDemo.Domain.Entities.Category", b =>
                 {
                     b.Property<int>("Id")
@@ -131,6 +220,38 @@ namespace VelavanDemo.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("Customers", (string)null);
+                });
+
+            modelBuilder.Entity("VelavanDemo.Domain.Entities.CustomerDocument", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AttachmentId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<int>("CustomerId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AttachmentId")
+                        .IsUnique();
+
+                    b.HasIndex("CustomerId");
+
+                    b.ToTable("CustomerDocuments", (string)null);
                 });
 
             modelBuilder.Entity("VelavanDemo.Domain.Entities.Delivery", b =>
@@ -388,6 +509,38 @@ namespace VelavanDemo.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("VelavanDemo.Domain.Entities.OrderAttachment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AttachmentId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<int>("OrderId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AttachmentId")
+                        .IsUnique();
+
+                    b.HasIndex("OrderId");
+
+                    b.ToTable("OrderAttachments", (string)null);
+                });
+
             modelBuilder.Entity("VelavanDemo.Domain.Entities.OrderItem", b =>
                 {
                     b.Property<int>("Id")
@@ -488,6 +641,52 @@ namespace VelavanDemo.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("Products", (string)null);
+                });
+
+            modelBuilder.Entity("VelavanDemo.Domain.Entities.ProductImage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AttachmentId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AttachmentId")
+                        .IsUnique();
+
+                    b.HasIndex("ProductId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ProductImages_ProductId_Primary")
+                        .HasFilter("[IsPrimary] = 1");
+
+                    b.HasIndex("ProductId", "SortOrder");
+
+                    b.ToTable("ProductImages", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProductImages_SortOrder", "[SortOrder] >= 0");
+                        });
                 });
 
             modelBuilder.Entity("VelavanDemo.Domain.Entities.Role", b =>
@@ -752,6 +951,35 @@ namespace VelavanDemo.Infrastructure.Persistence.Migrations
                     b.ToTable("Warehouses", (string)null);
                 });
 
+            modelBuilder.Entity("VelavanDemo.Domain.Entities.Attachment", b =>
+                {
+                    b.HasOne("VelavanDemo.Domain.Entities.User", "UploadedByUser")
+                        .WithMany("UploadedAttachments")
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("UploadedByUser");
+                });
+
+            modelBuilder.Entity("VelavanDemo.Domain.Entities.CustomerDocument", b =>
+                {
+                    b.HasOne("VelavanDemo.Domain.Entities.Attachment", "Attachment")
+                        .WithMany()
+                        .HasForeignKey("AttachmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("VelavanDemo.Domain.Entities.Customer", "Customer")
+                        .WithMany("Documents")
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Attachment");
+
+                    b.Navigation("Customer");
+                });
+
             modelBuilder.Entity("VelavanDemo.Domain.Entities.Delivery", b =>
                 {
                     b.HasOne("VelavanDemo.Domain.Entities.DeliveryPartner", "DeliveryPartner")
@@ -800,6 +1028,25 @@ namespace VelavanDemo.Infrastructure.Persistence.Migrations
                     b.Navigation("Customer");
                 });
 
+            modelBuilder.Entity("VelavanDemo.Domain.Entities.OrderAttachment", b =>
+                {
+                    b.HasOne("VelavanDemo.Domain.Entities.Attachment", "Attachment")
+                        .WithMany()
+                        .HasForeignKey("AttachmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("VelavanDemo.Domain.Entities.Order", "Order")
+                        .WithMany("Attachments")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Attachment");
+
+                    b.Navigation("Order");
+                });
+
             modelBuilder.Entity("VelavanDemo.Domain.Entities.OrderItem", b =>
                 {
                     b.HasOne("VelavanDemo.Domain.Entities.Order", "Order")
@@ -828,6 +1075,25 @@ namespace VelavanDemo.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Category");
+                });
+
+            modelBuilder.Entity("VelavanDemo.Domain.Entities.ProductImage", b =>
+                {
+                    b.HasOne("VelavanDemo.Domain.Entities.Attachment", "Attachment")
+                        .WithMany()
+                        .HasForeignKey("AttachmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("VelavanDemo.Domain.Entities.Product", "Product")
+                        .WithMany("Images")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Attachment");
+
+                    b.Navigation("Product");
                 });
 
             modelBuilder.Entity("VelavanDemo.Domain.Entities.StockTransfer", b =>
@@ -894,6 +1160,8 @@ namespace VelavanDemo.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("VelavanDemo.Domain.Entities.Customer", b =>
                 {
+                    b.Navigation("Documents");
+
                     b.Navigation("Orders");
                 });
 
@@ -904,6 +1172,8 @@ namespace VelavanDemo.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("VelavanDemo.Domain.Entities.Order", b =>
                 {
+                    b.Navigation("Attachments");
+
                     b.Navigation("Delivery");
 
                     b.Navigation("Items");
@@ -911,6 +1181,8 @@ namespace VelavanDemo.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("VelavanDemo.Domain.Entities.Product", b =>
                 {
+                    b.Navigation("Images");
+
                     b.Navigation("InventoryItems");
                 });
 
@@ -926,6 +1198,8 @@ namespace VelavanDemo.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("VelavanDemo.Domain.Entities.User", b =>
                 {
+                    b.Navigation("UploadedAttachments");
+
                     b.Navigation("UserRoles");
                 });
 

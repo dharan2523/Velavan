@@ -17,5 +17,8 @@ public enum OperationError
     UnsupportedFileType = 12,
     AttachmentLimitReached = 13,
     AttachmentConflict = 14,
-    StorageFailure = 15
+    StorageFailure = 15,
+    MalwareDetected = 16,
+    ScanUnavailable = 17,
+    StorageQuotaExceeded = 18
 }

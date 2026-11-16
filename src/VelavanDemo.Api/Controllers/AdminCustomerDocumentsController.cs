@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using VelavanDemo.Api.Authorization;
 using VelavanDemo.Application.Attachments;
 
@@ -34,6 +35,7 @@ public sealed class AdminCustomerDocumentsController : AttachmentControllerBase
     }
 
     [HttpPost]
+    [EnableRateLimiting("attachment-uploads")]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(MaxUploadRequestBytes)]
     [RequestFormLimits(MultipartBodyLengthLimit = MaxUploadRequestBytes)]

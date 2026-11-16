@@ -80,6 +80,22 @@ describe('AttachmentListComponent', () => {
     expect(deleteSpy).toHaveBeenCalledWith(pdf);
   });
 
+  it('disables actions for attachments that are busy', () => {
+    fixture.componentRef.setInput('attachments', [pdf]);
+    fixture.componentRef.setInput('busyAttachmentIds', new Set([pdf.id]));
+    fixture.detectChanges();
+
+    const downloadButton = fixture.nativeElement.querySelector(
+      'button[aria-label="Download attachment"]'
+    ) as HTMLButtonElement;
+    const deleteButton = fixture.nativeElement.querySelector(
+      'button[aria-label="Delete attachment"]'
+    ) as HTMLButtonElement;
+
+    expect(downloadButton.disabled).toBeTrue();
+    expect(deleteButton.disabled).toBeTrue();
+  });
+
   it('renders an empty state', () => {
     fixture.detectChanges();
 

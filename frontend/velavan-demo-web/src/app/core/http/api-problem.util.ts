@@ -36,6 +36,32 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+export async function getApiErrorMessageAsync(
+  error: unknown,
+  fallback: string
+): Promise<string> {
+  if (!(error instanceof HttpErrorResponse)) {
+    return fallback;
+  }
+
+  if (error.error instanceof Blob) {
+    try {
+      const text = await error.error.text();
+      const parsed: unknown = JSON.parse(text);
+      const message =
+        getApiValidationMessage(parsed) ?? getApiProblemDetail(parsed);
+
+      if (message) {
+        return message;
+      }
+    } catch {
+      // Fall through to the status-based message below.
+    }
+  }
+
+  return getApiErrorMessage(error, fallback);
+}
+
 export function getApiProblemDetail(value: unknown): string | null {
   if (!isRecord(value)) {
     return null;

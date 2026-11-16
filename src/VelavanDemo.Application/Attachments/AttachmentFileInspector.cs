@@ -61,8 +61,15 @@ public sealed class AttachmentFileInspector : IAttachmentFileInspector
         }
 
         var normalizedContentType = NormalizeContentType(declaredContentType);
+        var acceptsGenericContentType =
+            normalizedContentType.Length == 0 ||
+            string.Equals(
+                normalizedContentType,
+                "application/octet-stream",
+                StringComparison.OrdinalIgnoreCase);
 
-        if (!string.Equals(normalizedContentType, expectedContentType, StringComparison.OrdinalIgnoreCase))
+        if (!acceptsGenericContentType &&
+            !string.Equals(normalizedContentType, expectedContentType, StringComparison.OrdinalIgnoreCase))
         {
             return OperationResult<AttachmentFileInfo>.Failure(
                 OperationError.UnsupportedFileType,

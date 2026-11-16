@@ -1,3 +1,4 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -20,8 +21,16 @@ import {
   AttachmentResponse
 } from '../../../core/attachments/attachment.models';
 import { AttachmentService } from '../../../core/attachments/attachment.service';
+import {
+  DOCUMENT_EXTENSIONS,
+  DOCUMENT_MAX_BYTES,
+  DOCUMENT_MAX_COUNT
+} from '../../../core/attachments/attachment-policy';
 import { saveBlob } from '../../../core/attachments/attachment-file.util';
-import { getApiErrorMessage } from '../../../core/http/api-problem.util';
+import {
+  getApiErrorMessage,
+  getApiErrorMessageAsync
+} from '../../../core/http/api-problem.util';
 import {
   ConfirmDialogComponent,
   ConfirmDialogData
@@ -29,9 +38,6 @@ import {
 import { AttachmentListComponent } from '../attachment-list/attachment-list.component';
 import { AttachmentPreviewDialogComponent } from '../attachment-preview-dialog/attachment-preview-dialog.component';
 import { AttachmentUploadComponent } from '../attachment-upload/attachment-upload.component';
-
-const DOCUMENT_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.webp'] as const;
-const DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
 
 @Component({
   selector: 'app-attachment-manager',
@@ -55,14 +61,16 @@ export class AttachmentManagerComponent {
   readonly ownerType = input.required<AttachmentOwnerType>();
   readonly ownerId = input.required<number>();
   readonly heading = input('Attachments');
-  readonly maxAttachments = input(25);
+  readonly maxAttachments = input(DOCUMENT_MAX_COUNT);
 
   readonly attachments = signal<AttachmentResponse[]>([]);
   readonly loading = signal(false);
   readonly loadError = signal('');
   readonly uploading = signal(false);
   readonly uploadProgress = signal<number | null>(null);
-  readonly busyAttachmentId = signal<number | null>(null);
+  readonly busyAttachmentIds = signal<ReadonlySet<number>>(new Set());
+
+  private loadSequence = 0;
 
   readonly documentExtensions = DOCUMENT_EXTENSIONS;
   readonly maxDocumentBytes = DOCUMENT_MAX_BYTES;
@@ -82,6 +90,7 @@ export class AttachmentManagerComponent {
     ownerType = this.ownerType(),
     ownerId = this.ownerId()
   ): void {
+    const sequence = ++this.loadSequence;
     this.loading.set(true);
     this.loadError.set('');
 
@@ -89,11 +98,23 @@ export class AttachmentManagerComponent {
       .getOwnerAttachments(ownerType, ownerId)
       .pipe(
         takeUntilDestroyed(this.destroyRef),
-        finalize(() => this.loading.set(false))
+        finalize(() => {
+          if (sequence === this.loadSequence) {
+            this.loading.set(false);
+          }
+        })
       )
       .subscribe({
-        next: attachments => this.attachments.set([...attachments]),
+        next: attachments => {
+          if (sequence === this.loadSequence) {
+            this.attachments.set([...attachments]);
+          }
+        },
         error: (error: unknown) => {
+          if (sequence !== this.loadSequence) {
+            return;
+          }
+
           this.attachments.set([]);
           this.loadError.set(
             getApiErrorMessage(error, 'Attachments could not be loaded.')
@@ -103,6 +124,10 @@ export class AttachmentManagerComponent {
   }
 
   upload(file: File): void {
+    if (this.uploading()) {
+      return;
+    }
+
     if (this.atLimit()) {
       this.notify(
         `At most ${this.maxAttachments()} attachments can be uploaded.`
@@ -171,27 +196,46 @@ export class AttachmentManagerComponent {
     });
   }
 
+  isAttachmentBusy(attachmentId: number): boolean {
+    return this.busyAttachmentIds().has(attachmentId);
+  }
+
   download(attachment: AttachmentResponse): void {
-    this.busyAttachmentId.set(attachment.id);
+    if (this.isAttachmentBusy(attachment.id)) {
+      return;
+    }
+
+    this.markBusy(attachment.id);
 
     this.attachmentService
       .getAttachmentContent(attachment.id, true)
       .pipe(
         takeUntilDestroyed(this.destroyRef),
-        finalize(() => this.busyAttachmentId.set(null))
+        finalize(() => this.clearBusy(attachment.id))
       )
       .subscribe({
         next: content => saveBlob(content.blob, content.fileName),
         error: (error: unknown) => {
-          this.notify(
-            getApiErrorMessage(error, 'The attachment could not be downloaded.')
-          );
+          if (error instanceof HttpErrorResponse && error.error instanceof Blob) {
+            void getApiErrorMessageAsync(
+              error,
+              'The attachment could not be downloaded.'
+            ).then(message => this.notify(message));
+          } else {
+            this.notify(
+              getApiErrorMessage(error, 'The attachment could not be downloaded.')
+            );
+          }
         }
       });
   }
 
   private deleteAttachment(attachment: AttachmentResponse): void {
-    this.busyAttachmentId.set(attachment.id);
+    if (this.isAttachmentBusy(attachment.id)) {
+      return;
+    }
+
+    this.markBusy(attachment.id);
 
     this.attachmentService
       .deleteOwnerAttachment(
@@ -201,7 +245,7 @@ export class AttachmentManagerComponent {
       )
       .pipe(
         takeUntilDestroyed(this.destroyRef),
-        finalize(() => this.busyAttachmentId.set(null))
+        finalize(() => this.clearBusy(attachment.id))
       )
       .subscribe({
         next: () => {
@@ -214,6 +258,26 @@ export class AttachmentManagerComponent {
           );
         }
       });
+  }
+
+  private markBusy(attachmentId: number): void {
+    this.busyAttachmentIds.update(current => {
+      const next = new Set(current);
+      next.add(attachmentId);
+      return next;
+    });
+  }
+
+  private clearBusy(attachmentId: number): void {
+    this.busyAttachmentIds.update(current => {
+      if (!current.has(attachmentId)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.delete(attachmentId);
+      return next;
+    });
   }
 
   private notify(message: string): void {

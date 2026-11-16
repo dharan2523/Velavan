@@ -36,6 +36,19 @@ public static class AttachmentPolicies
             ".webp"
         };
 
+    private static readonly IReadOnlySet<string> InlineContentTypes =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+        };
+
+    public static bool CanPreviewInline(string contentType)
+    {
+        return InlineContentTypes.Contains(contentType);
+    }
+
     public static AttachmentPolicy For(AttachmentKind kind)
     {
         return kind switch

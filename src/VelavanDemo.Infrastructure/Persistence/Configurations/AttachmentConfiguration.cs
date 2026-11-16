@@ -10,7 +10,13 @@ internal sealed class AttachmentConfiguration : BaseEntityConfiguration<Attachme
     {
         base.Configure(builder);
 
-        builder.ToTable("Attachments");
+        builder.ToTable("Attachments", table =>
+        {
+            table.HasCheckConstraint("CK_Attachments_SizeBytes", "[SizeBytes] > 0");
+            table.HasCheckConstraint(
+                "CK_Attachments_Dimensions",
+                "([Width] IS NULL AND [Height] IS NULL) OR ([Width] > 0 AND [Height] > 0)");
+        });
 
         builder.Property(attachment => attachment.Kind)
             .HasConversion<string>()

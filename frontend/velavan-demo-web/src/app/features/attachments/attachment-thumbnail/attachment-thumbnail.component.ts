@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
@@ -51,7 +51,7 @@ export class AttachmentThumbnailComponent {
   constructor() {
     effect(() => {
       const attachmentId = this.attachmentId();
-      this.load(attachmentId);
+      untracked(() => this.load(attachmentId));
     });
 
     this.destroyRef.onDestroy(() => {

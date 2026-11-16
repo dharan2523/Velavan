@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using VelavanDemo.Api.Authorization;
 using VelavanDemo.Application.Attachments;
 
@@ -34,6 +35,7 @@ public sealed class AdminProductImagesController : AttachmentControllerBase
     }
 
     [HttpPost]
+    [EnableRateLimiting("attachment-uploads")]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(MaxUploadRequestBytes)]
     [RequestFormLimits(MultipartBodyLengthLimit = MaxUploadRequestBytes)]
@@ -97,7 +99,7 @@ public sealed class AdminProductImagesController : AttachmentControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ReorderImages(
         int productId,
-        [FromBody] ReorderProductImagesRequest request,
+        [FromBody] ReorderProductImagesRequest? request,
         CancellationToken cancellationToken)
     {
         var result = await _attachmentService.ReorderProductImagesAsync(

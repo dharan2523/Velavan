@@ -10,7 +10,8 @@ internal sealed class ProductImageConfiguration : BaseEntityConfiguration<Produc
     {
         base.Configure(builder);
 
-        builder.ToTable("ProductImages");
+        builder.ToTable("ProductImages", table =>
+            table.HasCheckConstraint("CK_ProductImages_SortOrder", "[SortOrder] >= 0"));
 
         builder.HasIndex(image => image.AttachmentId)
             .IsUnique();

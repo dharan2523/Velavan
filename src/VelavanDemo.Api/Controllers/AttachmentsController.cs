@@ -57,8 +57,9 @@ public sealed class AttachmentsController : AttachmentControllerBase
 
         var content = result.Value!;
 
-        if (Request.Headers.IfNoneMatch.Any(value =>
-                string.Equals(value, content.ETag, StringComparison.Ordinal)))
+        Response.Headers["ETag"] = content.ETag;
+
+        if (IfNoneMatchMatches(Request.Headers.IfNoneMatch, content.ETag))
         {
             content.Content.Dispose();
             return StatusCode(StatusCodes.Status304NotModified);
@@ -69,12 +70,33 @@ public sealed class AttachmentsController : AttachmentControllerBase
             content.Inline);
         Response.Headers["Cache-Control"] = "private, no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
-        Response.Headers["ETag"] = content.ETag;
 
         return new FileStreamResult(content.Content, content.ContentType)
         {
             EnableRangeProcessing = true
         };
+    }
+
+    private static bool IfNoneMatchMatches(
+        IReadOnlyList<string> headerValues,
+        string currentETag)
+    {
+        foreach (var headerValue in headerValues)
+        {
+            foreach (var candidate in headerValue.Split(','))
+            {
+                var normalized = candidate.Trim();
+
+                if (normalized == "*" ||
+                    string.Equals(normalized, currentETag, StringComparison.Ordinal) ||
+                    string.Equals(normalized, $"W/{currentETag}", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static string BuildContentDisposition(string fileName, bool inline)

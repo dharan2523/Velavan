@@ -31,6 +31,18 @@ public abstract class AttachmentControllerBase : ApiControllerBase
                 statusCode: StatusCodes.Status409Conflict,
                 title: "Attachment conflict",
                 detail: result.Message),
+            OperationError.MalwareDetected => Problem(
+                statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "Unsafe file",
+                detail: result.Message),
+            OperationError.ScanUnavailable => Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Security scan unavailable",
+                detail: result.Message),
+            OperationError.StorageQuotaExceeded => Problem(
+                statusCode: StatusCodes.Status507InsufficientStorage,
+                title: "Storage quota exceeded",
+                detail: result.Message),
             OperationError.Forbidden => Forbid(),
             OperationError.StorageFailure => Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
@@ -66,6 +78,18 @@ public abstract class AttachmentControllerBase : ApiControllerBase
             OperationError.AttachmentConflict => Problem(
                 statusCode: StatusCodes.Status409Conflict,
                 title: "Attachment conflict",
+                detail: result.Message),
+            OperationError.MalwareDetected => Problem(
+                statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "Unsafe file",
+                detail: result.Message),
+            OperationError.ScanUnavailable => Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Security scan unavailable",
+                detail: result.Message),
+            OperationError.StorageQuotaExceeded => Problem(
+                statusCode: StatusCodes.Status507InsufficientStorage,
+                title: "Storage quota exceeded",
                 detail: result.Message),
             OperationError.Forbidden => Forbid(),
             OperationError.StorageFailure => Problem(

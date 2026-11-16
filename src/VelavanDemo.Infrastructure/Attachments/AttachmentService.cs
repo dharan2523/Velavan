@@ -1,5 +1,7 @@
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using VelavanDemo.Application.Attachments;
 using VelavanDemo.Application.Common;
 using VelavanDemo.Domain.Entities;
@@ -12,21 +14,30 @@ public sealed class AttachmentService : IAttachmentService
 {
     private readonly ApplicationDbContext _dbContext;
     private readonly IFileStorage _fileStorage;
+    private readonly IFileStorageInventory _fileStorageInventory;
     private readonly IAttachmentFileInspector _fileInspector;
     private readonly IUploadedFileScanner _fileScanner;
+    private readonly IAttachmentConcurrencyGate _mutationGate;
+    private readonly AttachmentStorageOptions _storageOptions;
     private readonly ILogger<AttachmentService> _logger;
 
     public AttachmentService(
         ApplicationDbContext dbContext,
         IFileStorage fileStorage,
+        IFileStorageInventory fileStorageInventory,
         IAttachmentFileInspector fileInspector,
         IUploadedFileScanner fileScanner,
+        IAttachmentConcurrencyGate mutationGate,
+        IOptions<AttachmentStorageOptions> storageOptions,
         ILogger<AttachmentService> logger)
     {
         _dbContext = dbContext;
         _fileStorage = fileStorage;
+        _fileStorageInventory = fileStorageInventory;
         _fileInspector = fileInspector;
         _fileScanner = fileScanner;
+        _mutationGate = mutationGate;
+        _storageOptions = storageOptions.Value;
         _logger = logger;
     }
 
@@ -67,59 +78,82 @@ public sealed class AttachmentService : IAttachmentService
                 "Product was not found.");
         }
 
-        var policy = AttachmentPolicies.For(AttachmentKind.ProductImage);
-        var existingImageCount = await _dbContext.ProductImages
-            .CountAsync(image => image.ProductId == productId, cancellationToken);
+        await using var lease = await _mutationGate.AcquireAsync(cancellationToken);
 
-        if (existingImageCount >= policy.MaxCount)
+        return await ExecuteInTransactionAsync(async () =>
         {
-            return OperationResult<ProductImageResponse>.Failure(
-                OperationError.AttachmentLimitReached,
-                $"A product can have at most {policy.MaxCount} images.");
-        }
+            var policy = AttachmentPolicies.For(AttachmentKind.ProductImage);
+            var existingImageCount = await _dbContext.ProductImages
+                .CountAsync(image => image.ProductId == productId, cancellationToken);
 
-        var storedAttachment = await CreateAttachmentAsync(
-            AttachmentKind.ProductImage,
-            upload,
-            uploadedByUserId,
-            cancellationToken);
+            if (existingImageCount >= policy.MaxCount)
+            {
+                return OperationResult<ProductImageResponse>.Failure(
+                    OperationError.AttachmentLimitReached,
+                    $"A product can have at most {policy.MaxCount} images.");
+            }
 
-        if (!storedAttachment.Succeeded)
-        {
-            return OperationResult<ProductImageResponse>.Failure(
-                storedAttachment.Error,
-                storedAttachment.Message!);
-        }
+            var quotaFailure = await CheckStorageQuotaAsync(upload.Length, cancellationToken);
 
-        var attachment = storedAttachment.Value!;
-        var nextSortOrder = existingImageCount == 0
-            ? 0
-            : await _dbContext.ProductImages
-                .Where(image => image.ProductId == productId)
-                .MaxAsync(image => image.SortOrder, cancellationToken) + 1;
+            if (quotaFailure is not null)
+            {
+                return OperationResult<ProductImageResponse>.Failure(
+                    quotaFailure.Error,
+                    quotaFailure.Message!);
+            }
 
-        var productImage = new ProductImage
-        {
-            ProductId = productId,
-            Attachment = attachment,
-            IsPrimary = existingImageCount == 0,
-            SortOrder = nextSortOrder
-        };
+            var nextSortOrder = existingImageCount == 0
+                ? 0
+                : (await _dbContext.ProductImages
+                    .Where(image => image.ProductId == productId)
+                    .MaxAsync(image => (int?)image.SortOrder, cancellationToken) ?? -1) + 1;
 
-        _dbContext.Attachments.Add(attachment);
-        _dbContext.ProductImages.Add(productImage);
+            var storedAttachment = await CreateAttachmentAsync(
+                AttachmentKind.ProductImage,
+                upload,
+                uploadedByUserId,
+                cancellationToken);
 
-        try
-        {
-            await _dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch
-        {
-            await TryDeleteStoredFileAsync(attachment, cancellationToken);
-            throw;
-        }
+            if (!storedAttachment.Succeeded)
+            {
+                return OperationResult<ProductImageResponse>.Failure(
+                    storedAttachment.Error,
+                    storedAttachment.Message!);
+            }
 
-        return OperationResult<ProductImageResponse>.Success(Map(productImage));
+            var attachment = storedAttachment.Value!;
+            var productImage = new ProductImage
+            {
+                ProductId = productId,
+                Attachment = attachment,
+                IsPrimary = existingImageCount == 0,
+                SortOrder = nextSortOrder
+            };
+
+            _dbContext.Attachments.Add(attachment);
+            _dbContext.ProductImages.Add(productImage);
+
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
+            {
+                await TryDeleteStoredFileAsync(attachment.StorageKey);
+                _dbContext.ChangeTracker.Clear();
+
+                return OperationResult<ProductImageResponse>.Failure(
+                    OperationError.AttachmentConflict,
+                    "The product image changed while it was being saved. Refresh and try again.");
+            }
+            catch
+            {
+                await TryDeleteStoredFileAsync(attachment.StorageKey);
+                throw;
+            }
+
+            return OperationResult<ProductImageResponse>.Success(Map(productImage));
+        }, cancellationToken);
     }
 
     public async Task<OperationResult> SetPrimaryProductImageAsync(
@@ -127,74 +161,102 @@ public sealed class AttachmentService : IAttachmentService
         int attachmentId,
         CancellationToken cancellationToken = default)
     {
-        var images = await _dbContext.ProductImages
-            .Include(image => image.Attachment)
-            .Where(image => image.ProductId == productId)
-            .ToListAsync(cancellationToken);
+        await using var lease = await _mutationGate.AcquireAsync(cancellationToken);
 
-        var target = images.SingleOrDefault(image => image.AttachmentId == attachmentId);
-
-        if (target is null)
+        try
         {
+            return await ExecuteInTransactionAsync(async () =>
+            {
+                var images = await _dbContext.ProductImages
+                    .Include(image => image.Attachment)
+                    .Where(image => image.ProductId == productId)
+                    .ToListAsync(cancellationToken);
+
+                var target = images.SingleOrDefault(image => image.AttachmentId == attachmentId);
+
+                if (target is null)
+                {
+                    return OperationResult.Failure(
+                        OperationError.NotFound,
+                        "Product image was not found.");
+                }
+
+                if (target.IsPrimary)
+                {
+                    return OperationResult.Success();
+                }
+
+                foreach (var image in images.Where(image => image.IsPrimary))
+                {
+                    image.IsPrimary = false;
+                }
+
+                await _dbContext.SaveChangesAsync(cancellationToken);
+
+                target.IsPrimary = true;
+                await _dbContext.SaveChangesAsync(cancellationToken);
+
+                return OperationResult.Success();
+            }, cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
+        {
+            _dbContext.ChangeTracker.Clear();
+
             return OperationResult.Failure(
-                OperationError.NotFound,
-                "Product image was not found.");
+                OperationError.AttachmentConflict,
+                "The primary image changed while it was being saved. Refresh and try again.");
         }
-
-        if (target.IsPrimary)
-        {
-            return OperationResult.Success();
-        }
-
-        foreach (var image in images.Where(image => image.IsPrimary))
-        {
-            image.IsPrimary = false;
-        }
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        target.IsPrimary = true;
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        return OperationResult.Success();
     }
 
     public async Task<OperationResult> ReorderProductImagesAsync(
         int productId,
-        ReorderProductImagesRequest request,
+        ReorderProductImagesRequest? request,
         CancellationToken cancellationToken = default)
     {
-        if (!await ProductExistsAsync(productId, cancellationToken))
-        {
-            return OperationResult.Failure(OperationError.NotFound, "Product was not found.");
-        }
+        var requestedIds = request?.AttachmentIds;
 
-        var images = await _dbContext.ProductImages
-            .Where(image => image.ProductId == productId)
-            .ToListAsync(cancellationToken);
-
-        var requestedIds = request.AttachmentIds ?? new List<int>();
-
-        if (requestedIds.Count != images.Count ||
-            requestedIds.Distinct().Count() != requestedIds.Count ||
-            !requestedIds.ToHashSet().SetEquals(images.Select(image => image.AttachmentId)))
+        if (requestedIds is null || requestedIds.Count == 0)
         {
             return OperationResult.Failure(
                 OperationError.Validation,
                 "Provide every product image exactly once when reordering.");
         }
 
-        var imagesById = images.ToDictionary(image => image.AttachmentId);
-        var sortOrder = 0;
+        await using var lease = await _mutationGate.AcquireAsync(cancellationToken);
 
-        foreach (var imageId in requestedIds)
+        return await ExecuteInTransactionAsync(async () =>
         {
-            imagesById[imageId].SortOrder = sortOrder++;
-        }
+            if (!await ProductExistsAsync(productId, cancellationToken))
+            {
+                return OperationResult.Failure(OperationError.NotFound, "Product was not found.");
+            }
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+            var images = await _dbContext.ProductImages
+                .Where(image => image.ProductId == productId)
+                .ToListAsync(cancellationToken);
 
-        return OperationResult.Success();
+            if (requestedIds.Count != images.Count ||
+                requestedIds.Distinct().Count() != requestedIds.Count ||
+                !requestedIds.ToHashSet().SetEquals(images.Select(image => image.AttachmentId)))
+            {
+                return OperationResult.Failure(
+                    OperationError.Validation,
+                    "Provide every product image exactly once when reordering.");
+            }
+
+            var imagesById = images.ToDictionary(image => image.AttachmentId);
+            var sortOrder = 0;
+
+            foreach (var imageId in requestedIds)
+            {
+                imagesById[imageId].SortOrder = sortOrder++;
+            }
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            return OperationResult.Success();
+        }, cancellationToken);
     }
 
     public async Task<OperationResult> DeleteProductImageAsync(
@@ -202,46 +264,58 @@ public sealed class AttachmentService : IAttachmentService
         int attachmentId,
         CancellationToken cancellationToken = default)
     {
-        var image = await _dbContext.ProductImages
-            .Include(candidate => candidate.Attachment)
-            .SingleOrDefaultAsync(
-                candidate =>
-                    candidate.ProductId == productId &&
-                    candidate.AttachmentId == attachmentId,
-                cancellationToken);
+        await using var lease = await _mutationGate.AcquireAsync(cancellationToken);
+        string? storageKey = null;
 
-        if (image is null)
+        var result = await ExecuteInTransactionAsync(async () =>
         {
-            return OperationResult.Failure(
-                OperationError.NotFound,
-                "Product image was not found.");
-        }
+            var image = await _dbContext.ProductImages
+                .Include(candidate => candidate.Attachment)
+                .SingleOrDefaultAsync(
+                    candidate =>
+                        candidate.ProductId == productId &&
+                        candidate.AttachmentId == attachmentId,
+                    cancellationToken);
 
-        var replacement = image.IsPrimary
-            ? await _dbContext.ProductImages
-                .Where(candidate =>
-                    candidate.ProductId == productId &&
-                    candidate.AttachmentId != attachmentId)
-                .OrderBy(candidate => candidate.SortOrder)
-                .ThenBy(candidate => candidate.Id)
-                .FirstOrDefaultAsync(cancellationToken)
-            : null;
+            if (image is null)
+            {
+                return OperationResult.Failure(
+                    OperationError.NotFound,
+                    "Product image was not found.");
+            }
 
-        var attachment = image.Attachment;
+            var replacement = image.IsPrimary
+                ? await _dbContext.ProductImages
+                    .Where(candidate =>
+                        candidate.ProductId == productId &&
+                        candidate.AttachmentId != attachmentId)
+                    .OrderBy(candidate => candidate.SortOrder)
+                    .ThenBy(candidate => candidate.Id)
+                    .FirstOrDefaultAsync(cancellationToken)
+                : null;
 
-        _dbContext.ProductImages.Remove(image);
-        _dbContext.Attachments.Remove(attachment);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+            var attachment = image.Attachment;
+            storageKey = attachment.StorageKey;
 
-        if (replacement is not null)
-        {
-            replacement.IsPrimary = true;
+            _dbContext.ProductImages.Remove(image);
+            _dbContext.Attachments.Remove(attachment);
             await _dbContext.SaveChangesAsync(cancellationToken);
+
+            if (replacement is not null)
+            {
+                replacement.IsPrimary = true;
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+
+            return OperationResult.Success();
+        }, cancellationToken);
+
+        if (result.Succeeded && storageKey is not null)
+        {
+            await TryDeleteStoredFileAsync(storageKey);
         }
 
-        await TryDeleteStoredFileAsync(attachment, cancellationToken);
-
-        return OperationResult.Success();
+        return result;
     }
 
     public async Task<OperationResult<IReadOnlyList<AttachmentResponse>>> GetCustomerDocumentsAsync(
@@ -280,50 +354,73 @@ public sealed class AttachmentService : IAttachmentService
                 "Customer was not found.");
         }
 
-        var policy = AttachmentPolicies.For(AttachmentKind.CustomerDocument);
-        var existingCount = await _dbContext.CustomerDocuments
-            .CountAsync(document => document.CustomerId == customerId, cancellationToken);
+        await using var lease = await _mutationGate.AcquireAsync(cancellationToken);
 
-        if (existingCount >= policy.MaxCount)
+        return await ExecuteInTransactionAsync(async () =>
         {
-            return OperationResult<AttachmentResponse>.Failure(
-                OperationError.AttachmentLimitReached,
-                $"A customer can have at most {policy.MaxCount} documents.");
-        }
+            var policy = AttachmentPolicies.For(AttachmentKind.CustomerDocument);
+            var existingCount = await _dbContext.CustomerDocuments
+                .CountAsync(document => document.CustomerId == customerId, cancellationToken);
 
-        var storedAttachment = await CreateAttachmentAsync(
-            AttachmentKind.CustomerDocument,
-            upload,
-            uploadedByUserId,
-            cancellationToken);
+            if (existingCount >= policy.MaxCount)
+            {
+                return OperationResult<AttachmentResponse>.Failure(
+                    OperationError.AttachmentLimitReached,
+                    $"A customer can have at most {policy.MaxCount} documents.");
+            }
 
-        if (!storedAttachment.Succeeded)
-        {
-            return OperationResult<AttachmentResponse>.Failure(
-                storedAttachment.Error,
-                storedAttachment.Message!);
-        }
+            var quotaFailure = await CheckStorageQuotaAsync(upload.Length, cancellationToken);
 
-        var attachment = storedAttachment.Value!;
+            if (quotaFailure is not null)
+            {
+                return OperationResult<AttachmentResponse>.Failure(
+                    quotaFailure.Error,
+                    quotaFailure.Message!);
+            }
 
-        _dbContext.Attachments.Add(attachment);
-        _dbContext.CustomerDocuments.Add(new CustomerDocument
-        {
-            CustomerId = customerId,
-            Attachment = attachment
-        });
+            var storedAttachment = await CreateAttachmentAsync(
+                AttachmentKind.CustomerDocument,
+                upload,
+                uploadedByUserId,
+                cancellationToken);
 
-        try
-        {
-            await _dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch
-        {
-            await TryDeleteStoredFileAsync(attachment, cancellationToken);
-            throw;
-        }
+            if (!storedAttachment.Succeeded)
+            {
+                return OperationResult<AttachmentResponse>.Failure(
+                    storedAttachment.Error,
+                    storedAttachment.Message!);
+            }
 
-        return OperationResult<AttachmentResponse>.Success(Map(attachment));
+            var attachment = storedAttachment.Value!;
+
+            _dbContext.Attachments.Add(attachment);
+            _dbContext.CustomerDocuments.Add(new CustomerDocument
+            {
+                CustomerId = customerId,
+                Attachment = attachment
+            });
+
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
+            {
+                await TryDeleteStoredFileAsync(attachment.StorageKey);
+                _dbContext.ChangeTracker.Clear();
+
+                return OperationResult<AttachmentResponse>.Failure(
+                    OperationError.AttachmentConflict,
+                    "The customer document changed while it was being saved. Refresh and try again.");
+            }
+            catch
+            {
+                await TryDeleteStoredFileAsync(attachment.StorageKey);
+                throw;
+            }
+
+            return OperationResult<AttachmentResponse>.Success(Map(attachment));
+        }, cancellationToken);
     }
 
     public async Task<OperationResult> DeleteCustomerDocumentAsync(
@@ -331,30 +428,42 @@ public sealed class AttachmentService : IAttachmentService
         int attachmentId,
         CancellationToken cancellationToken = default)
     {
-        var document = await _dbContext.CustomerDocuments
-            .Include(candidate => candidate.Attachment)
-            .SingleOrDefaultAsync(
-                candidate =>
-                    candidate.CustomerId == customerId &&
-                    candidate.AttachmentId == attachmentId,
-                cancellationToken);
+        await using var lease = await _mutationGate.AcquireAsync(cancellationToken);
+        string? storageKey = null;
 
-        if (document is null)
+        var result = await ExecuteInTransactionAsync(async () =>
         {
-            return OperationResult.Failure(
-                OperationError.NotFound,
-                "Customer document was not found.");
+            var document = await _dbContext.CustomerDocuments
+                .Include(candidate => candidate.Attachment)
+                .SingleOrDefaultAsync(
+                    candidate =>
+                        candidate.CustomerId == customerId &&
+                        candidate.AttachmentId == attachmentId,
+                    cancellationToken);
+
+            if (document is null)
+            {
+                return OperationResult.Failure(
+                    OperationError.NotFound,
+                    "Customer document was not found.");
+            }
+
+            var attachment = document.Attachment;
+            storageKey = attachment.StorageKey;
+
+            _dbContext.CustomerDocuments.Remove(document);
+            _dbContext.Attachments.Remove(attachment);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            return OperationResult.Success();
+        }, cancellationToken);
+
+        if (result.Succeeded && storageKey is not null)
+        {
+            await TryDeleteStoredFileAsync(storageKey);
         }
 
-        var attachment = document.Attachment;
-
-        _dbContext.CustomerDocuments.Remove(document);
-        _dbContext.Attachments.Remove(attachment);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        await TryDeleteStoredFileAsync(attachment, cancellationToken);
-
-        return OperationResult.Success();
+        return result;
     }
 
     public async Task<OperationResult<IReadOnlyList<AttachmentResponse>>> GetOrderAttachmentsAsync(
@@ -393,50 +502,73 @@ public sealed class AttachmentService : IAttachmentService
                 "Order was not found.");
         }
 
-        var policy = AttachmentPolicies.For(AttachmentKind.OrderAttachment);
-        var existingCount = await _dbContext.OrderAttachments
-            .CountAsync(orderAttachment => orderAttachment.OrderId == orderId, cancellationToken);
+        await using var lease = await _mutationGate.AcquireAsync(cancellationToken);
 
-        if (existingCount >= policy.MaxCount)
+        return await ExecuteInTransactionAsync(async () =>
         {
-            return OperationResult<AttachmentResponse>.Failure(
-                OperationError.AttachmentLimitReached,
-                $"An order can have at most {policy.MaxCount} attachments.");
-        }
+            var policy = AttachmentPolicies.For(AttachmentKind.OrderAttachment);
+            var existingCount = await _dbContext.OrderAttachments
+                .CountAsync(orderAttachment => orderAttachment.OrderId == orderId, cancellationToken);
 
-        var storedAttachment = await CreateAttachmentAsync(
-            AttachmentKind.OrderAttachment,
-            upload,
-            uploadedByUserId,
-            cancellationToken);
+            if (existingCount >= policy.MaxCount)
+            {
+                return OperationResult<AttachmentResponse>.Failure(
+                    OperationError.AttachmentLimitReached,
+                    $"An order can have at most {policy.MaxCount} attachments.");
+            }
 
-        if (!storedAttachment.Succeeded)
-        {
-            return OperationResult<AttachmentResponse>.Failure(
-                storedAttachment.Error,
-                storedAttachment.Message!);
-        }
+            var quotaFailure = await CheckStorageQuotaAsync(upload.Length, cancellationToken);
 
-        var attachment = storedAttachment.Value!;
+            if (quotaFailure is not null)
+            {
+                return OperationResult<AttachmentResponse>.Failure(
+                    quotaFailure.Error,
+                    quotaFailure.Message!);
+            }
 
-        _dbContext.Attachments.Add(attachment);
-        _dbContext.OrderAttachments.Add(new OrderAttachment
-        {
-            OrderId = orderId,
-            Attachment = attachment
-        });
+            var storedAttachment = await CreateAttachmentAsync(
+                AttachmentKind.OrderAttachment,
+                upload,
+                uploadedByUserId,
+                cancellationToken);
 
-        try
-        {
-            await _dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch
-        {
-            await TryDeleteStoredFileAsync(attachment, cancellationToken);
-            throw;
-        }
+            if (!storedAttachment.Succeeded)
+            {
+                return OperationResult<AttachmentResponse>.Failure(
+                    storedAttachment.Error,
+                    storedAttachment.Message!);
+            }
 
-        return OperationResult<AttachmentResponse>.Success(Map(attachment));
+            var attachment = storedAttachment.Value!;
+
+            _dbContext.Attachments.Add(attachment);
+            _dbContext.OrderAttachments.Add(new OrderAttachment
+            {
+                OrderId = orderId,
+                Attachment = attachment
+            });
+
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
+            {
+                await TryDeleteStoredFileAsync(attachment.StorageKey);
+                _dbContext.ChangeTracker.Clear();
+
+                return OperationResult<AttachmentResponse>.Failure(
+                    OperationError.AttachmentConflict,
+                    "The order attachment changed while it was being saved. Refresh and try again.");
+            }
+            catch
+            {
+                await TryDeleteStoredFileAsync(attachment.StorageKey);
+                throw;
+            }
+
+            return OperationResult<AttachmentResponse>.Success(Map(attachment));
+        }, cancellationToken);
     }
 
     public async Task<OperationResult> DeleteOrderAttachmentAsync(
@@ -444,30 +576,42 @@ public sealed class AttachmentService : IAttachmentService
         int attachmentId,
         CancellationToken cancellationToken = default)
     {
-        var orderAttachment = await _dbContext.OrderAttachments
-            .Include(candidate => candidate.Attachment)
-            .SingleOrDefaultAsync(
-                candidate =>
-                    candidate.OrderId == orderId &&
-                    candidate.AttachmentId == attachmentId,
-                cancellationToken);
+        await using var lease = await _mutationGate.AcquireAsync(cancellationToken);
+        string? storageKey = null;
 
-        if (orderAttachment is null)
+        var result = await ExecuteInTransactionAsync(async () =>
         {
-            return OperationResult.Failure(
-                OperationError.NotFound,
-                "Order attachment was not found.");
+            var orderAttachment = await _dbContext.OrderAttachments
+                .Include(candidate => candidate.Attachment)
+                .SingleOrDefaultAsync(
+                    candidate =>
+                        candidate.OrderId == orderId &&
+                        candidate.AttachmentId == attachmentId,
+                    cancellationToken);
+
+            if (orderAttachment is null)
+            {
+                return OperationResult.Failure(
+                    OperationError.NotFound,
+                    "Order attachment was not found.");
+            }
+
+            var attachment = orderAttachment.Attachment;
+            storageKey = attachment.StorageKey;
+
+            _dbContext.OrderAttachments.Remove(orderAttachment);
+            _dbContext.Attachments.Remove(attachment);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            return OperationResult.Success();
+        }, cancellationToken);
+
+        if (result.Succeeded && storageKey is not null)
+        {
+            await TryDeleteStoredFileAsync(storageKey);
         }
 
-        var attachment = orderAttachment.Attachment;
-
-        _dbContext.OrderAttachments.Remove(orderAttachment);
-        _dbContext.Attachments.Remove(attachment);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        await TryDeleteStoredFileAsync(attachment, cancellationToken);
-
-        return OperationResult.Success();
+        return result;
     }
 
     public async Task<OperationResult<AttachmentResponse>> GetAttachmentAsync(
@@ -507,9 +651,7 @@ public sealed class AttachmentService : IAttachmentService
                 attachment.StorageKey,
                 cancellationToken);
 
-            var inline = !download && attachment.ContentType.StartsWith(
-                "image/",
-                StringComparison.OrdinalIgnoreCase);
+            var inline = !download && AttachmentPolicies.CanPreviewInline(attachment.ContentType);
 
             return OperationResult<AttachmentContent>.Success(
                 new AttachmentContent(
@@ -535,6 +677,28 @@ public sealed class AttachmentService : IAttachmentService
             _logger.LogError(
                 exception,
                 "Attachment {AttachmentId} content could not be opened.",
+                attachmentId);
+
+            return OperationResult<AttachmentContent>.Failure(
+                OperationError.StorageFailure,
+                "The attachment content is unavailable.");
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            _logger.LogError(
+                exception,
+                "Attachment {AttachmentId} content access was denied.",
+                attachmentId);
+
+            return OperationResult<AttachmentContent>.Failure(
+                OperationError.StorageFailure,
+                "The attachment content is unavailable.");
+        }
+        catch (InvalidOperationException exception)
+        {
+            _logger.LogError(
+                exception,
+                "Attachment {AttachmentId} has an invalid storage key.",
                 attachmentId);
 
             return OperationResult<AttachmentContent>.Failure(
@@ -595,6 +759,22 @@ public sealed class AttachmentService : IAttachmentService
                 OperationError.FileTooLarge,
                 $"The file exceeds the {policy.MaxBytes / (1024 * 1024)} MB limit.");
         }
+        catch (IOException exception)
+        {
+            _logger.LogError(exception, "Attachment storage is unavailable while saving a file.");
+
+            return OperationResult<Attachment>.Failure(
+                OperationError.StorageFailure,
+                "The attachment storage is unavailable.");
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            _logger.LogError(exception, "Attachment storage denied access while saving a file.");
+
+            return OperationResult<Attachment>.Failure(
+                OperationError.StorageFailure,
+                "The attachment storage is unavailable.");
+        }
 
         try
         {
@@ -630,7 +810,7 @@ public sealed class AttachmentService : IAttachmentService
 
                     if (!scanResult.Succeeded)
                     {
-                        validationError = OperationError.Validation;
+                        validationError = scanResult.Error;
                         validationMessage = scanResult.Message
                             ?? "The uploaded file failed security scanning.";
                     }
@@ -643,7 +823,7 @@ public sealed class AttachmentService : IAttachmentService
 
             if (validationError != OperationError.None)
             {
-                await _fileStorage.DeleteAsync(storedFile.StorageKey, cancellationToken);
+                await TryDeleteStoredFileAsync(storedFile.StorageKey);
 
                 return OperationResult<Attachment>.Failure(
                     validationError,
@@ -667,8 +847,34 @@ public sealed class AttachmentService : IAttachmentService
         }
         catch (OperationCanceledException)
         {
-            await TryDeleteStoredFileAsync(storedFile, CancellationToken.None);
+            await TryDeleteStoredFileAsync(storedFile.StorageKey);
             throw;
+        }
+        catch (IOException exception)
+        {
+            _logger.LogError(
+                exception,
+                "Stored attachment file key {StorageKey} could not be read for validation.",
+                storedFile.StorageKey);
+
+            await TryDeleteStoredFileAsync(storedFile.StorageKey);
+
+            return OperationResult<Attachment>.Failure(
+                OperationError.StorageFailure,
+                "The attachment storage is unavailable.");
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            _logger.LogError(
+                exception,
+                "Stored attachment file key {StorageKey} could not be accessed for validation.",
+                storedFile.StorageKey);
+
+            await TryDeleteStoredFileAsync(storedFile.StorageKey);
+
+            return OperationResult<Attachment>.Failure(
+                OperationError.StorageFailure,
+                "The attachment storage is unavailable.");
         }
         catch (Exception exception)
         {
@@ -677,7 +883,7 @@ public sealed class AttachmentService : IAttachmentService
                 "Attachment validation failed for stored file key {StorageKey}.",
                 storedFile.StorageKey);
 
-            await TryDeleteStoredFileAsync(storedFile, CancellationToken.None);
+            await TryDeleteStoredFileAsync(storedFile.StorageKey);
 
             return OperationResult<Attachment>.Failure(
                 OperationError.Validation,
@@ -685,37 +891,74 @@ public sealed class AttachmentService : IAttachmentService
         }
     }
 
-    private async Task TryDeleteStoredFileAsync(
-        Attachment attachment,
+    private async Task<OperationResult?> CheckStorageQuotaAsync(
+        long additionalBytes,
         CancellationToken cancellationToken)
     {
+        if (_storageOptions.MaxTotalBytes <= 0)
+        {
+            return null;
+        }
+
         try
         {
-            await _fileStorage.DeleteAsync(attachment.StorageKey, cancellationToken);
+            var totalBytes = await _fileStorageInventory.GetTotalSizeBytesAsync(cancellationToken);
+
+            if (totalBytes + additionalBytes > _storageOptions.MaxTotalBytes)
+            {
+                return OperationResult.Failure(
+                    OperationError.StorageQuotaExceeded,
+                    "The attachment storage quota has been reached.");
+            }
+
+            return null;
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning(
-                exception,
-                "Stored attachment file {StorageKey} could not be deleted.",
-                attachment.StorageKey);
+            _logger.LogError(exception, "Attachment storage quota could not be checked.");
+
+            return OperationResult.Failure(
+                OperationError.StorageFailure,
+                "The attachment storage is unavailable.");
         }
     }
 
-    private async Task TryDeleteStoredFileAsync(
-        StoredFile storedFile,
+    private async Task<T> ExecuteInTransactionAsync<T>(
+        Func<Task<T>> action,
         CancellationToken cancellationToken)
+    {
+        if (!_dbContext.Database.IsRelational())
+        {
+            return await action();
+        }
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var result = await action();
+            await transaction.CommitAsync(cancellationToken);
+            return result;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    private async Task TryDeleteStoredFileAsync(string storageKey)
     {
         try
         {
-            await _fileStorage.DeleteAsync(storedFile.StorageKey, cancellationToken);
+            await _fileStorage.DeleteAsync(storageKey, CancellationToken.None);
         }
         catch (Exception exception)
         {
             _logger.LogWarning(
                 exception,
                 "Stored attachment file {StorageKey} could not be deleted.",
-                storedFile.StorageKey);
+                storageKey);
         }
     }
 
@@ -738,6 +981,20 @@ public sealed class AttachmentService : IAttachmentService
         return _dbContext.Orders
             .AsNoTracking()
             .AnyAsync(order => order.Id == orderId, cancellationToken);
+    }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException exception)
+    {
+        if (exception.InnerException is SqlException sqlException &&
+            sqlException.Number is 2601 or 2627)
+        {
+            return true;
+        }
+
+        var message = exception.InnerException?.Message ?? exception.Message;
+
+        return message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("UNIQUE constraint", StringComparison.OrdinalIgnoreCase);
     }
 
     private static AttachmentResponse Map(Attachment attachment)

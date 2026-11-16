@@ -1,3 +1,4 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -21,7 +22,10 @@ import {
 } from '../../../core/attachments/attachment.models';
 import { AttachmentService } from '../../../core/attachments/attachment.service';
 import { saveBlob } from '../../../core/attachments/attachment-file.util';
-import { getApiErrorMessage } from '../../../core/http/api-problem.util';
+import {
+  getApiErrorMessage,
+  getApiErrorMessageAsync
+} from '../../../core/http/api-problem.util';
 
 @Component({
   selector: 'app-attachment-preview-dialog',
@@ -58,16 +62,27 @@ export class AttachmentPreviewDialogComponent {
           this.content.set(content);
 
           if (content.contentType.toLowerCase().startsWith('image/')) {
+            this.revokeImageUrl();
             this.imageUrl.set(URL.createObjectURL(content.blob));
           }
 
           this.loading.set(false);
         },
         error: (error: unknown) => {
-          this.error.set(
-            getApiErrorMessage(error, 'The attachment could not be loaded.')
-          );
+          this.revokeImageUrl();
+          this.content.set(null);
           this.loading.set(false);
+
+          if (error instanceof HttpErrorResponse && error.error instanceof Blob) {
+            void getApiErrorMessageAsync(
+              error,
+              'The attachment could not be loaded.'
+            ).then(message => this.error.set(message));
+          } else {
+            this.error.set(
+              getApiErrorMessage(error, 'The attachment could not be loaded.')
+            );
+          }
         }
       });
 

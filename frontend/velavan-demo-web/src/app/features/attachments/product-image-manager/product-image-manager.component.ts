@@ -17,6 +17,11 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { finalize } from 'rxjs';
 import { ProductImageResponse } from '../../../core/attachments/attachment.models';
 import { AttachmentService } from '../../../core/attachments/attachment.service';
+import {
+  PRODUCT_IMAGE_EXTENSIONS,
+  PRODUCT_IMAGE_MAX_BYTES,
+  PRODUCT_IMAGE_MAX_COUNT
+} from '../../../core/attachments/attachment-policy';
 import { getApiErrorMessage } from '../../../core/http/api-problem.util';
 import {
   ConfirmDialogComponent,
@@ -25,9 +30,6 @@ import {
 import { AttachmentPreviewDialogComponent } from '../attachment-preview-dialog/attachment-preview-dialog.component';
 import { AttachmentUploadComponent } from '../attachment-upload/attachment-upload.component';
 import { ImageGalleryComponent } from '../image-gallery/image-gallery.component';
-
-const PRODUCT_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'] as const;
-const PRODUCT_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
 @Component({
   selector: 'app-product-image-manager',
@@ -50,21 +52,23 @@ export class ProductImageManagerComponent {
 
   readonly productId = input.required<number>();
   readonly heading = input('Product images');
-  readonly maxImages = input(8);
+  readonly maxImages = input(PRODUCT_IMAGE_MAX_COUNT);
 
   readonly images = signal<ProductImageResponse[]>([]);
   readonly loading = signal(false);
   readonly loadError = signal('');
   readonly uploading = signal(false);
   readonly uploadProgress = signal<number | null>(null);
-  readonly busyAttachmentId = signal<number | null>(null);
+  readonly busyAttachmentIds = signal<ReadonlySet<number>>(new Set());
   readonly reordering = signal(false);
+
+  private loadSequence = 0;
 
   readonly imageExtensions = PRODUCT_IMAGE_EXTENSIONS;
   readonly maxImageBytes = PRODUCT_IMAGE_MAX_BYTES;
   readonly atLimit = computed(() => this.images().length >= this.maxImages());
   readonly isBusy = computed(
-    () => this.busyAttachmentId() !== null || this.reordering()
+    () => this.busyAttachmentIds().size > 0 || this.reordering()
   );
 
   constructor() {
@@ -75,6 +79,7 @@ export class ProductImageManagerComponent {
   }
 
   loadImages(productId = this.productId()): void {
+    const sequence = ++this.loadSequence;
     this.loading.set(true);
     this.loadError.set('');
 
@@ -82,11 +87,23 @@ export class ProductImageManagerComponent {
       .getProductImages(productId)
       .pipe(
         takeUntilDestroyed(this.destroyRef),
-        finalize(() => this.loading.set(false))
+        finalize(() => {
+          if (sequence === this.loadSequence) {
+            this.loading.set(false);
+          }
+        })
       )
       .subscribe({
-        next: images => this.images.set([...images]),
+        next: images => {
+          if (sequence === this.loadSequence) {
+            this.images.set([...images]);
+          }
+        },
         error: (error: unknown) => {
+          if (sequence !== this.loadSequence) {
+            return;
+          }
+
           this.images.set([]);
           this.loadError.set(
             getApiErrorMessage(error, 'Product images could not be loaded.')
@@ -96,6 +113,10 @@ export class ProductImageManagerComponent {
   }
 
   upload(file: File): void {
+    if (this.uploading()) {
+      return;
+    }
+
     if (this.atLimit()) {
       this.notify(`A product can have at most ${this.maxImages()} images.`);
       return;
@@ -129,17 +150,17 @@ export class ProductImageManagerComponent {
   }
 
   setPrimary(image: ProductImageResponse): void {
-    if (image.isPrimary) {
+    if (image.isPrimary || this.isBusy()) {
       return;
     }
 
-    this.busyAttachmentId.set(image.id);
+    this.markBusy(image.id);
 
     this.attachmentService
       .setPrimaryProductImage(this.productId(), image.id)
       .pipe(
         takeUntilDestroyed(this.destroyRef),
-        finalize(() => this.busyAttachmentId.set(null))
+        finalize(() => this.clearBusy(image.id))
       )
       .subscribe({
         next: () => {
@@ -155,6 +176,10 @@ export class ProductImageManagerComponent {
   }
 
   reorder(attachmentIds: number[]): void {
+    if (this.isBusy()) {
+      return;
+    }
+
     this.reordering.set(true);
 
     this.attachmentService
@@ -205,13 +230,17 @@ export class ProductImageManagerComponent {
   }
 
   private deleteImage(image: ProductImageResponse): void {
-    this.busyAttachmentId.set(image.id);
+    if (this.isBusy()) {
+      return;
+    }
+
+    this.markBusy(image.id);
 
     this.attachmentService
       .deleteProductImage(this.productId(), image.id)
       .pipe(
         takeUntilDestroyed(this.destroyRef),
-        finalize(() => this.busyAttachmentId.set(null))
+        finalize(() => this.clearBusy(image.id))
       )
       .subscribe({
         next: () => {
@@ -224,6 +253,26 @@ export class ProductImageManagerComponent {
           );
         }
       });
+  }
+
+  private markBusy(attachmentId: number): void {
+    this.busyAttachmentIds.update(current => {
+      const next = new Set(current);
+      next.add(attachmentId);
+      return next;
+    });
+  }
+
+  private clearBusy(attachmentId: number): void {
+    this.busyAttachmentIds.update(current => {
+      if (!current.has(attachmentId)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.delete(attachmentId);
+      return next;
+    });
   }
 
   private notify(message: string): void {

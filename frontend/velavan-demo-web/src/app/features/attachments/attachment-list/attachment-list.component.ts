@@ -15,7 +15,7 @@ import { formatFileSize } from '../../../core/attachments/attachment-file.util';
 })
 export class AttachmentListComponent {
   readonly attachments = input<readonly AttachmentResponse[]>([]);
-  readonly busyAttachmentId = input<number | null>(null);
+  readonly busyAttachmentIds = input<ReadonlySet<number>>(new Set());
 
   readonly preview = output<AttachmentResponse>();
   readonly download = output<AttachmentResponse>();
@@ -33,6 +33,10 @@ export class AttachmentListComponent {
     return attachment.contentType === 'application/pdf'
       ? 'picture_as_pdf'
       : 'description';
+  }
+
+  isBusy(attachmentId: number): boolean {
+    return this.busyAttachmentIds().has(attachmentId);
   }
 
   formatSize(bytes: number): string {
